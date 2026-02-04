@@ -35,7 +35,8 @@ pub const CREATE_NO_WINDOW: u32 = 0x08000000;
 /// - Network round-trip to remote server
 /// - WinRM/SSH auth handshake
 /// - Slow domain controllers
-/// But prevents indefinite hangs on unreachable hosts.
+///
+///   But prevents indefinite hangs on unreachable hosts.
 pub const CREDENTIAL_VALIDATION_TIMEOUT_SECS: u64 = 10;
 
 /// TCP connection timeout for reachability probes (milliseconds)
@@ -52,7 +53,8 @@ pub const TCP_PROBE_TIMEOUT_MS: u64 = 1200;
 /// - Loading enormous malicious files into memory
 /// - Out-of-memory crashes
 /// - Accidental import of non-backup files
-/// Legitimate backups are typically <1 MB.
+///
+///   Legitimate backups are typically <1 MB.
 pub const MAX_BACKUP_FILE_SIZE: u64 = 100 * 1024 * 1024; // 100 MB
 
 // ============================================================================

@@ -275,7 +275,7 @@ async fn download_and_launch_installer(url: &str) -> Result<(), String> {
     // Determine filename from URL
     let filename = url
         .split('/')
-        .last()
+        .next_back()
         .unwrap_or("quickprobe-setup.exe")
         .to_string();
 
