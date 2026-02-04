@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "node",
+    "target": "ESNext",
+    "checkJs": false
+  },
+  "include": [
+    "ui/**/*"
+  ],
+  "exclude": [
+    "node_modules",
+    "e2e",
+    "target",
+    "dist"
+  ]
+}

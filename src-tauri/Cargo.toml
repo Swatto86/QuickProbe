@@ -1,0 +1,67 @@
+[package]
+name = "quickprobe"
+version = "2.0.0"
+edition = "2021"
+authors = ["Swatto"]
+description = "Windows server interrogation tool using WinRM/CIM"
+
+[dependencies]
+# Tauri framework (v2.x)
+tauri = { version = "2.0", features = ["tray-icon"] }
+tauri-plugin-dialog = "2.0"
+tauri-plugin-shell = "2.0"
+tauri-plugin-process = "2.0"
+tauri-plugin-global-shortcut = "2.0"
+tauri-plugin-opener = "2.0"
+tauri-plugin-fs = "2.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+zip = { version = "0.6", features = ["aes-crypto"] }
+rusqlite = { version = "0.31", default-features = false, features = ["bundled"] }
+chrono = { version = "0.4", default-features = false, features = ["alloc", "clock"] }
+base64 = "0.22"
+
+# LDAP for AD scanning
+ldap3 = { version = "0.11", default-features = false, features = ["tls-native"] }
+ssh2 = { version = "0.9", features = ["vendored-openssl"] }
+shell-escape = "0.1"
+
+# Async runtime
+tokio = { version = "1.42", features = ["rt-multi-thread", "process", "time", "io-util", "sync", "macros"] }
+async-trait = "0.1"
+futures = "0.3"
+
+# HTTP client for update checking (uses rustls to avoid native SSL build issues)
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+
+# Error handling
+thiserror = "2.0"
+
+# Random number generation for jitter
+rand = "0.8"
+
+# Windows APIs
+windows = { version = "0.58", features = [
+    "Win32_Foundation",
+    "Win32_Security_Credentials",
+    "Win32_System_Registry",
+] }
+
+[features]
+# Required for production builds
+custom-protocol = ["tauri/custom-protocol"]
+default = []
+
+# Remove bytes override - no longer needed with Tauri 2.x updated dependencies
+
+[build-dependencies]
+# Tauri build
+tauri-build = { version = "2.0", features = [] }
+
+[dev-dependencies]
+tokio = { version = "1.42", features = ["macros", "rt"] }
+tempfile = "3.10"
+
+[workspace]
+members = ["."]
+default-members = ["."]

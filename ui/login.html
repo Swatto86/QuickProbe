@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QuickProbe - Login</title>
+    <!-- Apply theme before any render to prevent FOUC -->
+    <script>
+        (function () {
+            const root = document.documentElement;
+            root.classList.add('qp-preload');
+            const reveal = () => root.classList.remove('qp-preload');
+            window.__qpRevealSettings = reveal;
+            window.__qpPreloadTimer = setTimeout(reveal, 100);
+
+            // Apply theme immediately from localStorage (before ThemeModule loads)
+            try {
+                const settingsStr = localStorage.getItem('quickprobe_settings');
+                if (settingsStr) {
+                    const settings = JSON.parse(settingsStr);
+                    const themeSetting = settings.theme || 'system';
+
+                    // Simple inline resolution - ThemeModule will correct if needed
+                    let resolvedTheme = themeSetting;
+                    if (themeSetting === 'system') {
+                        resolvedTheme = window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+                    }
+
+                    root.setAttribute('data-theme', resolvedTheme);
+                } else {
+                    root.setAttribute('data-theme', 'dark');
+                }
+            } catch (e) {
+                console.warn('Failed to apply initial theme:', e);
+                root.setAttribute('data-theme', 'dark');
+            }
+        })();
+    </script>
+    <style>
+        .qp-preload body {
+            opacity: 0;
+            pointer-events: none;
+        }
+    </style>
+    <!-- Tailwind CSS + DaisyUI (locally built) -->
+    <link href="styles.css" rel="stylesheet">
+    <link rel="icon" href="data:,">
+    <!-- Unified theme module for cross-window sync -->
+    <script src="theme.js"></script>
+</head>
+
+<body class="bg-base-100">
+    <!-- Centering container -->
+    <div class="min-h-screen flex items-center justify-center p-6 sm:p-10">
+        <div id="app" class="w-full max-w-md">
+            <!-- Login View -->
+            <div id="login-view" class="view">
+                <div class="card bg-base-200 shadow-2xl">
+                    <div class="card-body gap-4">
+                        <!-- Header -->
+                        <div class="text-center mb-6">
+                            <h1 class="text-4xl font-bold text-primary mb-2">QuickProbe</h1>
+                            <p class="text-sm text-base-content/70">Windows Server Interrogation Tool</p>
+                        </div>
+
+                        <!-- Alert Messages -->
+                        <div id="error-message" class="alert alert-error shadow-lg hidden mb-4">
+                            <span>⚠️</span>
+                            <span class="error-text text-sm"></span>
+                        </div>
+                        <div id="countdown-message" class="alert alert-info shadow-lg hidden mb-4">
+                            <span>ℹ️</span>
+                            <span class="text-sm">Auto-login in <span id="countdown-seconds" class="font-bold">5</span>
+                                seconds...</span>
+                        </div>
+
+                        <!-- Login Form -->
+                        <form id="login-form" autocomplete="off" class="space-y-4">
+                            <div class="form-control">
+                                <label class="label" for="username">
+                                    <span class="label-text font-medium">Username</span>
+                                </label>
+                                <input type="text" id="username" name="username"
+                                    class="input input-bordered w-full focus:input-primary" required autocomplete="off"
+                                    placeholder="Enter your username">
+                            </div>
+
+                            <div class="form-control">
+                                <label class="label" for="password">
+                                    <span class="label-text font-medium">Password</span>
+                                </label>
+                                <input type="password" id="password" name="password"
+                                    class="input input-bordered w-full focus:input-primary" required autocomplete="off"
+                                    placeholder="Enter your password">
+                            </div>
+
+                            <div class="form-control mt-8">
+                                <button type="submit" id="login-button" class="btn btn-primary w-full gap-2">
+                                    🔐 Login
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Validating View -->
+            <div id="validating-view" class="view hidden">
+                <div class="card bg-base-200 shadow-2xl">
+                    <div class="card-body">
+                        <div class="flex flex-col items-center justify-center gap-6 py-8">
+                            <span class="loading loading-spinner loading-lg text-primary"></span>
+                            <div class="text-center">
+                                <p class="text-lg font-medium">Validating credentials...</p>
+                                <p class="text-sm text-base-content/60 mt-2">Please wait</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- End centering container -->
+
+        <script>
+            // Theme is now handled by ThemeModule in app.js
+            // All manual theme listeners removed to avoid duplicates
+        </script>
+        <script src="app.js"></script>
+</body>
+
+</html>

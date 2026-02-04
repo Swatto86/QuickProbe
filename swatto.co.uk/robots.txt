@@ -1,0 +1,24 @@
+# robots.txt for swatto.co.uk
+# Allow all search engines to crawl the site
+
+User-agent: *
+Allow: /
+
+# Specific crawl-delay for different bots (optional, but can help with server load)
+User-agent: Googlebot
+Crawl-delay: 0
+
+User-agent: Bingbot
+Crawl-delay: 0
+
+User-agent: Slurp
+Crawl-delay: 0
+
+# Disallow any admin or private areas (if you add them later)
+# User-agent: *
+# Disallow: /admin/
+# Disallow: /private/
+
+# Sitemap location
+Sitemap: https://swatto.co.uk/sitemap.xml
+

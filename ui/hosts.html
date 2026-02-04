@@ -1,0 +1,2142 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QuickProbe - Edit Hosts</title>
+    <!-- Apply theme before any render to prevent FOUC -->
+    <script>
+        (function () {
+            const root = document.documentElement;
+            root.classList.add('qp-preload');
+            const reveal = () => root.classList.remove('qp-preload');
+            window.__qpRevealSettings = reveal;
+            window.__qpPreloadTimer = setTimeout(reveal, 100);
+
+            // Apply theme immediately from localStorage (before ThemeModule loads)
+            try {
+                const settingsStr = localStorage.getItem('quickprobe_settings');
+                if (settingsStr) {
+                    const settings = JSON.parse(settingsStr);
+                    const themeSetting = settings.theme || 'system';
+
+                    // Simple inline resolution - ThemeModule will correct if needed
+                    let resolvedTheme = themeSetting;
+                    if (themeSetting === 'system') {
+                        resolvedTheme = window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+                    }
+
+                    root.setAttribute('data-theme', resolvedTheme);
+                } else {
+                    root.setAttribute('data-theme', 'dark');
+                }
+            } catch (e) {
+                console.warn('Failed to apply initial theme:', e);
+                root.setAttribute('data-theme', 'dark');
+            }
+        })();
+
+        function logDebug(message, obj) {
+            try {
+                const detail = obj ? `${message} | ${JSON.stringify(obj)}` : message;
+                if (window.__TAURI__?.core?.invoke) {
+                    window.__TAURI__.core.invoke('log_debug', { message: detail });
+                } else {
+                    console.debug(detail);
+                }
+            } catch (err) {
+                console.debug('logDebug failed', err, message);
+            }
+        }
+    </script>
+    <style>
+        .qp-preload body {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        /* Search highlighting - functional style */
+        .highlight {
+            background: hsl(var(--p) / 0.15);
+            color: hsl(var(--p));
+            border-radius: 4px;
+            padding: 0 2px;
+        }
+    </style>
+    <!-- Tailwind CSS + DaisyUI (locally built) -->
+    <link href="styles.css" rel="stylesheet">
+    <script src="dashboard-utils.js"></script>
+    <!-- Unified theme module for cross-window sync -->
+    <script src="theme.js"></script>
+</head>
+
+<body class="bg-base-100 min-h-screen p-4">
+    <div class="container mx-auto max-w-7xl">
+        <!-- Header -->
+        <div class="card bg-base-200 shadow-lg mb-4">
+            <div class="card-body p-4">
+                <div class="flex flex-wrap justify-between items-center gap-4">
+                    <div>
+                        <h1 class="text-3xl font-bold text-primary">Host Editor</h1>
+                        <p class="text-sm text-base-content/70 mt-1">Manage servers used by the dashboard</p>
+                    </div>
+                    <div class="flex flex-wrap gap-2">
+                        <button id="back-dashboard" class="btn btn-ghost gap-2">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24"
+                                stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                            </svg>
+                            Back to Dashboard
+                        </button>
+                        <button id="check-status-all" class="btn btn-ghost gap-2">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24"
+                                stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                            </svg>
+                            <span id="check-status-text">Refresh Status</span>
+                        </button>
+                        <button id="delete-all-hosts" class="btn btn-error gap-2">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24"
+                                stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                            Delete All Hosts
+                        </button>
+                        <button id="scan-ad" class="btn btn-primary gap-2">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24"
+                                stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                            </svg>
+                            Scan AD
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Banner Messages -->
+        <div id="banner" class="alert hidden mb-4"></div>
+
+        <!-- Main Content Grid -->
+        <div class="grid grid-cols-1 lg:grid-cols-[1fr_420px] gap-4">
+            <div class="card bg-base-200 shadow-xl">
+                <div class="card-body p-5">
+                    <div class="flex items-center justify-between mb-3">
+                        <div>
+                            <h2 class="card-title">Hosts</h2>
+                            <div class="text-sm text-base-content/60">Click a host to edit or remove</div>
+                        </div>
+                    </div>
+                    <div class="flex gap-2 items-center mb-3">
+                        <div class="relative flex-1">
+                            <input id="host-search" type="text" placeholder="Search hosts by name or notes..."
+                                class="input input-bordered w-full pr-10" autocomplete="off" spellcheck="false">
+                            <span class="absolute right-3 top-1/2 -translate-y-1/2 text-base-content/60">🔍</span>
+                        </div>
+                        <button id="clear-host-search" class="btn btn-ghost btn-sm" type="button">Clear</button>
+                    </div>
+                    <div id="host-list" class="space-y-3"></div>
+                </div>
+            </div>
+            <div class="card bg-base-200 shadow-xl">
+                <div class="card-body p-5">
+                    <h2 id="form-title" class="card-title mb-4">Add Host</h2>
+                    <form id="host-form" autocomplete="off" class="space-y-4">
+                        <div class="form-control">
+                            <label class="label" for="host-name"><span class="label-text">Server Name</span></label>
+                            <input type="text" id="host-name" name="hostName" required placeholder="e.g., SERVER1"
+                                class="input input-bordered" autocomplete="off" spellcheck="false" />
+                        </div>
+                        <div class="form-control">
+                            <label class="label" for="host-notes"><span class="label-text">Notes</span></label>
+                            <input type="text" id="host-notes" name="hostNotes" placeholder="Role or description"
+                                class="input input-bordered" autocomplete="off" spellcheck="false" />
+                        </div>
+                        <div class="form-control">
+                            <label class="label" for="host-group"><span class="label-text">Group</span></label>
+                            <div id="group-select-container">
+                                <select id="host-group" name="hostGroup" class="select select-bordered w-full">
+                                    <option value="">(No Group)</option>
+                                </select>
+                            </div>
+                            <div id="group-new-container" class="hidden mt-2">
+                                <div class="flex gap-2 items-center">
+                                    <input type="text" id="host-group-new" placeholder="Enter new group name"
+                                        class="input input-bordered input-sm flex-1" autocomplete="off"
+                                        spellcheck="false" />
+                                    <button type="button" id="group-new-cancel"
+                                        class="btn btn-sm btn-ghost">Cancel</button>
+                                </div>
+                            </div>
+                            <label class="label"><span class="label-text-alt text-base-content/60">Optional grouping
+                                    label for dashboard views. A server can only belong to one group.</span></label>
+                        </div>
+                        <div class="form-control">
+                            <label class="label" for="host-os"><span class="label-text">Host OS</span></label>
+                            <select id="host-os" name="hostOs" class="select select-bordered w-full">
+                                <option value="Windows">Windows</option>
+                                <option value="Linux">Linux</option>
+                            </select>
+                            <label class="label"><span class="label-text-alt text-base-content/60">Used for picking
+                                    probe/connect path; defaults
+                                    to Windows.</span></label>
+                        </div>
+                        <div class="form-control">
+                            <label class="label" for="host-services"><span class="label-text">Critical Services
+                                    (semicolon separated)</span></label>
+                            <div class="flex gap-2 items-center flex-wrap mb-2">
+                                <span class="text-sm">Templates:</span>
+                                <select id="service-template" class="select select-bordered select-sm">
+                                    <option value="">Choose a template...</option>
+                                </select>
+                                <button type="button" id="browse-services-btn" class="btn btn-sm btn-outline gap-1"
+                                    disabled>
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none"
+                                        viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                            d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                                    </svg>
+                                    Browse Services
+                                </button>
+                            </div>
+                            <textarea id="host-services" name="hostServices" rows="3"
+                                placeholder="WinRM; Print Spooler; Windows Update" class="textarea textarea-bordered"
+                                autocomplete="off" spellcheck="false"></textarea>
+                            <label class="label"><span class="label-text-alt text-base-content/60">These services will
+                                    be checked for this host.
+                                    Leave empty to use defaults.</span></label>
+                        </div>
+                        <div class="flex gap-2 flex-wrap">
+                            <button type="submit" class="btn btn-primary">Save Host</button>
+                            <button type="button" id="cancel-edit" class="btn btn-ghost">Cancel</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <dialog id="scan-modal" class="modal">
+            <div class="modal-box max-w-2xl">
+                <h3 class="font-bold text-lg">Scan Active Directory</h3>
+                <p class="py-3 text-base-content/80">Find Windows Server computers via LDAP (no PowerShell) and merge
+                    them into your host list.</p>
+                <div class="text-sm mb-4">
+                    <div class="font-semibold mb-2">What this scan does:</div>
+                    <ul class="list-disc list-inside space-y-1 text-base-content/70">
+                        <li>Uses stored domain credentials over LDAP to locate Windows Server computers.</li>
+                        <li>Adds new Windows hosts that are not already in your list.</li>
+                        <li>Keeps existing notes/services/group values for matching hosts.</li>
+                        <li>By default, removes Windows hosts that are no longer returned by this scan.</li>
+                    </ul>
+                </div>
+                <div id="scan-message" class="alert hidden mb-4"></div>
+                <form id="scan-form" autocomplete="off" class="space-y-4">
+                    <div class="form-control">
+                        <label class="label" for="scan-domain"><span class="label-text">Domain</span></label>
+                        <input type="text" id="scan-domain" placeholder="contoso.com" required
+                            class="input input-bordered" autocomplete="off" spellcheck="false" />
+                    </div>
+                    <div class="form-control">
+                        <label class="label" for="scan-dc"><span class="label-text">Domain Controller</span></label>
+                        <input type="text" id="scan-dc" placeholder="dc01.contoso.com" required
+                            class="input input-bordered" autocomplete="off" spellcheck="false" />
+                    </div>
+                    <div class="form-control">
+                        <label class="label cursor-pointer justify-start gap-3">
+                            <input type="checkbox" id="scan-keep-existing" class="checkbox" />
+                            <span class="label-text">Do not delete existing Windows hosts that are missing from this
+                                scan</span>
+                        </label>
+                        <label class="label"><span class="label-text-alt text-base-content/60">Use this when scanning
+                                another domain and you only want to add hosts.</span></label>
+                    </div>
+                    <div class="text-sm text-base-content/70 mb-4">Requires stored domain credentials. Uses LDAP filter
+                        for Windows Server only.</div>
+                    <div class="modal-action">
+                        <button type="submit" id="scan-run" class="btn btn-primary">Start Scan</button>
+                        <form method="dialog"><button type="button" id="scan-cancel" class="btn">Cancel</button></form>
+                    </div>
+                </form>
+            </div>
+            <form method="dialog"><button id="scan-close"
+                    class="btn btn-sm btn-circle btn-ghost absolute right-2 top-2">×</button></form>
+    </div>
+    </dialog>
+
+    <dialog id="delete-modal" class="modal">
+        <div class="modal-box">
+            <h3 class="font-bold text-lg text-error">Delete All Hosts</h3>
+            <p class="py-3 text-base-content/70">This will clear your host list and cannot be undone.</p>
+            <div class="form-control">
+                <label class="label" for="delete-confirm-input"><span class="label-text">Type <strong>DELETE</strong> to
+                        confirm</span></label>
+                <input id="delete-confirm-input" type="text" class="input input-bordered" autocomplete="off"
+                    spellcheck="false" />
+            </div>
+            <div class="modal-action">
+                <form method="dialog"><button type="button" id="delete-cancel" class="btn">Cancel</button></form>
+                <button type="button" id="delete-confirm" class="btn btn-error">Delete All</button>
+            </div>
+        </div>
+        <form method="dialog"><button id="delete-close"
+                class="btn btn-sm btn-circle btn-ghost absolute right-2 top-2">×</button></form>
+    </dialog>
+
+    <!-- Generic Confirmation Modal -->
+    <dialog id="confirm-modal" class="modal modal-bottom sm:modal-middle">
+        <div class="modal-box">
+            <h3 id="confirm-modal-title" class="font-bold text-lg">Confirm</h3>
+            <p id="confirm-modal-message" class="py-4 text-base-content/80 whitespace-pre-wrap"></p>
+            <div class="modal-action">
+                <button type="button" id="confirm-modal-cancel" class="btn">Cancel</button>
+                <button type="button" id="confirm-modal-ok" class="btn btn-primary">OK</button>
+            </div>
+        </div>
+        <!-- Backdrop that triggers cancel on click -->
+        <div class="modal-backdrop bg-black/50" id="confirm-modal-backdrop"></div>
+    </dialog>
+
+    <!-- Service Browser Modal -->
+    <dialog id="service-browser-modal" class="modal">
+        <div class="modal-box max-w-4xl max-h-[80vh] flex flex-col">
+            <h3 class="font-bold text-lg mb-2">Browse Services on <span id="service-browser-host"
+                    class="text-primary"></span></h3>
+            <p class="text-sm text-base-content/70 mb-3">Select services to monitor from the list below. Use the search
+                box to filter and click column headers to sort.</p>
+
+            <!-- Error/Status message -->
+            <div id="service-browser-message" class="alert hidden mb-3"></div>
+
+            <!-- Loading indicator -->
+            <div id="service-browser-loading" class="flex flex-col items-center justify-center py-8 hidden">
+                <span class="loading loading-spinner loading-lg text-primary"></span>
+                <p class="mt-3 text-base-content/70">Connecting and fetching services...</p>
+            </div>
+
+            <!-- Service list container (shown after loading) -->
+            <div id="service-browser-content" class="flex flex-col flex-1 min-h-0 hidden">
+                <!-- Controls row -->
+                <div class="flex flex-wrap gap-2 items-center mb-3">
+                    <div class="relative flex-1 min-w-[200px]">
+                        <input id="service-browser-search" type="text" placeholder="Filter services..."
+                            class="input input-bordered input-sm w-full pr-8" autocomplete="off" spellcheck="false">
+                        <span class="absolute right-2 top-1/2 -translate-y-1/2 text-base-content/50 text-sm">🔍</span>
+                    </div>
+                    <select id="service-browser-status-filter" class="select select-bordered select-sm">
+                        <option value="">All statuses</option>
+                        <option value="Running">Running</option>
+                        <option value="Stopped">Stopped</option>
+                    </select>
+                    <div class="text-sm text-base-content/60">
+                        <span id="service-browser-count">0</span> services
+                        (<span id="service-browser-selected-count">0</span> selected)
+                    </div>
+                </div>
+
+                <!-- Select all / Deselect all buttons -->
+                <div class="flex gap-2 mb-2">
+                    <button type="button" id="service-browser-select-visible" class="btn btn-xs btn-ghost">Select
+                        visible</button>
+                    <button type="button" id="service-browser-deselect-all" class="btn btn-xs btn-ghost">Deselect
+                        all</button>
+                </div>
+
+                <!-- Table container with scroll -->
+                <div class="overflow-auto flex-1 border border-base-300 rounded-lg">
+                    <table class="table table-sm table-pin-rows">
+                        <thead>
+                            <tr class="bg-base-200">
+                                <th class="w-10"></th>
+                                <th class="cursor-pointer hover:bg-base-300" data-sort="name">
+                                    Name <span class="sort-indicator"></span>
+                                </th>
+                                <th class="cursor-pointer hover:bg-base-300" data-sort="display_name">
+                                    Display Name <span class="sort-indicator"></span>
+                                </th>
+                                <th class="cursor-pointer hover:bg-base-300 w-24" data-sort="status">
+                                    Status <span class="sort-indicator"></span>
+                                </th>
+                                <th class="cursor-pointer hover:bg-base-300 w-28" data-sort="startup_type">
+                                    Startup <span class="sort-indicator"></span>
+                                </th>
+                                <th class="cursor-pointer hover:bg-base-300" data-sort="service_account">
+                                    Service User <span class="sort-indicator"></span>
+                                </th>
+                            </tr>
+                        </thead>
+                        <tbody id="service-browser-tbody"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Modal actions -->
+            <div class="modal-action mt-3">
+                <button type="button" id="service-browser-add" class="btn btn-primary" disabled>Add Selected</button>
+                <button type="button" id="service-browser-cancel" class="btn">Cancel</button>
+            </div>
+        </div>
+        <form method="dialog"><button id="service-browser-close"
+                class="btn btn-sm btn-circle btn-ghost absolute right-2 top-2">×</button></form>
+    </dialog>
+
+    <script>
+        const Utils = window.DashboardUtils;
+        let hosts = [];
+        let editingName = null;
+        let saveBusy = false;
+        let hostsChanged = false;
+        let searchTerm = '';
+        let deleteBusy = false;
+        let editDirty = false;
+        let lastSaveSnapshot = '';
+
+        // Service browser state
+        let serviceBrowserData = [];           // All services fetched from remote host
+        let serviceBrowserSelected = new Set(); // Selected service names (lowercased for comparison)
+        let serviceBrowserSortKey = 'name';     // Current sort column
+        let serviceBrowserSortAsc = true;       // Sort direction
+        let serviceBrowserBusy = false;         // Loading state
+
+        // Host status checking state
+        let hostStatusMap = new Map();          // Map<hostName, { status, timestamp, checking }>
+        let statusCheckInProgress = false;      // Global check-all in progress
+        const STATUS_CACHE_MS = 60000;          // Cache status for 60 seconds
+        const STATUS_CHECK_TIMEOUT_MS = 15000;  // Per-host check timeout
+
+        // Confirmation dialog state
+        let confirmResolve = null;              // Promise resolver for confirmation dialog
+
+        const SETTINGS_KEY = 'quickprobe_settings';
+        const HOSTS_CHANGED_KEY = 'qp_hosts_changed';
+        const settingsDefaultBundle = () => ({
+            qp_settings: {
+                probeTimeoutSeconds: 60,
+                infoTimeoutMs: 3500,
+                warningTimeoutMs: 4500,
+                errorTimeoutMs: 0,
+                locationMappings: [],
+                theme: 'system'
+            },
+            qp_server_order: [],
+            qp_host_view_mode: 'cards',
+            qp_hosts_changed: null,
+        });
+        let settingsBundle = settingsDefaultBundle();
+
+        function debounce(fn, wait) {
+            let t;
+            return (...args) => {
+                clearTimeout(t);
+                t = setTimeout(() => fn(...args), wait);
+            };
+        }
+
+        // ========== Group Dropdown Functions ==========
+
+        const ADD_NEW_GROUP_VALUE = '__add_new__';
+
+        function getUniqueGroups() {
+            const groups = new Set();
+            hosts.forEach(h => {
+                const group = (h.box || '').trim();
+                if (group) groups.add(group);
+            });
+            return Array.from(groups).sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
+        }
+
+        function populateGroupDropdown(selectedValue = '') {
+            const select = document.getElementById('host-group');
+            if (!select) return;
+
+            const groups = getUniqueGroups();
+            const currentValue = selectedValue || '';
+
+            select.innerHTML = '';
+
+            // Add "No Group" option first
+            const noGroupOpt = document.createElement('option');
+            noGroupOpt.value = '';
+            noGroupOpt.textContent = '(No Group)';
+            select.appendChild(noGroupOpt);
+
+            // Add existing groups
+            groups.forEach(group => {
+                const opt = document.createElement('option');
+                opt.value = group;
+                opt.textContent = group;
+                select.appendChild(opt);
+            });
+
+            // Add separator and "Add new group" option
+            const separator = document.createElement('option');
+            separator.disabled = true;
+            separator.textContent = '──────────';
+            select.appendChild(separator);
+
+            const addNewOpt = document.createElement('option');
+            addNewOpt.value = ADD_NEW_GROUP_VALUE;
+            addNewOpt.textContent = '+ Add new group...';
+            select.appendChild(addNewOpt);
+
+            // Set selected value
+            // If the current value isn't in the list (new group), add it
+            if (currentValue && !groups.includes(currentValue)) {
+                const customOpt = document.createElement('option');
+                customOpt.value = currentValue;
+                customOpt.textContent = currentValue;
+                // Insert before separator
+                select.insertBefore(customOpt, separator);
+            }
+            select.value = currentValue;
+        }
+
+        function showNewGroupInput() {
+            document.getElementById('group-select-container').classList.add('hidden');
+            document.getElementById('group-new-container').classList.remove('hidden');
+            const input = document.getElementById('host-group-new');
+            input.value = '';
+            input.focus();
+        }
+
+        function hideNewGroupInput() {
+            document.getElementById('group-new-container').classList.add('hidden');
+            document.getElementById('group-select-container').classList.remove('hidden');
+            document.getElementById('host-group-new').value = '';
+            // Reset select to previous value or no group
+            const select = document.getElementById('host-group');
+            if (select.value === ADD_NEW_GROUP_VALUE) {
+                select.value = '';
+            }
+        }
+
+        function confirmNewGroup() {
+            const input = document.getElementById('host-group-new');
+            const newGroup = (input.value || '').trim();
+            if (!newGroup) {
+                hideNewGroupInput();
+                return;
+            }
+            // Add new group to dropdown and select it
+            populateGroupDropdown(newGroup);
+            hideNewGroupInput();
+            markFormDirty();
+        }
+
+        function initGroupDropdown() {
+            const select = document.getElementById('host-group');
+            const cancelBtn = document.getElementById('group-new-cancel');
+            const newInput = document.getElementById('host-group-new');
+
+            if (select) {
+                select.addEventListener('change', () => {
+                    if (select.value === ADD_NEW_GROUP_VALUE) {
+                        showNewGroupInput();
+                    } else {
+                        markFormDirty();
+                    }
+                });
+            }
+
+            if (cancelBtn) {
+                cancelBtn.addEventListener('click', hideNewGroupInput);
+            }
+
+            if (newInput) {
+                // Confirm on Enter key
+                newInput.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter') {
+                        e.preventDefault();
+                        confirmNewGroup();
+                    } else if (e.key === 'Escape') {
+                        e.preventDefault();
+                        hideNewGroupInput();
+                    }
+                });
+                // Confirm on blur (when clicking away)
+                newInput.addEventListener('blur', () => {
+                    // Small delay to allow cancel button click to register
+                    setTimeout(() => {
+                        if (!document.getElementById('group-new-container').classList.contains('hidden')) {
+                            confirmNewGroup();
+                        }
+                    }, 150);
+                });
+            }
+
+            populateGroupDropdown();
+        }
+
+        function getSelectedGroup() {
+            // Check if new group input is visible
+            const newContainer = document.getElementById('group-new-container');
+            if (newContainer && !newContainer.classList.contains('hidden')) {
+                return (document.getElementById('host-group-new').value || '').trim();
+            }
+            const select = document.getElementById('host-group');
+            const value = select ? select.value : '';
+            return value === ADD_NEW_GROUP_VALUE ? '' : value;
+        }
+
+        // ========== Confirmation Dialog Functions ==========
+
+        function showConfirmDialog(message, options = {}) {
+            return new Promise((resolve) => {
+                const modal = document.getElementById('confirm-modal');
+                const titleEl = document.getElementById('confirm-modal-title');
+                const messageEl = document.getElementById('confirm-modal-message');
+                const okBtn = document.getElementById('confirm-modal-ok');
+                const cancelBtn = document.getElementById('confirm-modal-cancel');
+                const backdrop = document.getElementById('confirm-modal-backdrop');
+
+                if (!modal) {
+                    // Fallback to native confirm if modal not found
+                    resolve(window.confirm(message));
+                    return;
+                }
+
+                let resolved = false;
+
+                // Configure modal
+                titleEl.textContent = options.title || 'Confirm';
+                messageEl.textContent = message;
+                okBtn.textContent = options.okText || 'OK';
+                okBtn.className = `btn ${options.okClass || 'btn-primary'}`;
+                cancelBtn.textContent = options.cancelText || 'Cancel';
+
+                const doResolve = (value) => {
+                    if (resolved) return;
+                    resolved = true;
+                    cleanup();
+                    modal.close();
+                    resolve(value);
+                };
+
+                const handleOk = (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    doResolve(true);
+                };
+
+                const handleCancel = (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    doResolve(false);
+                };
+
+                const handleBackdropClick = (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    doResolve(false);
+                };
+
+                const handleKeydown = (e) => {
+                    if (e.key === 'Escape') {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        doResolve(false);
+                    }
+                };
+
+                // Handle dialog close event (catches any way the dialog might close)
+                const handleClose = () => {
+                    doResolve(false);
+                };
+
+                const cleanup = () => {
+                    okBtn.removeEventListener('click', handleOk);
+                    cancelBtn.removeEventListener('click', handleCancel);
+                    if (backdrop) backdrop.removeEventListener('click', handleBackdropClick);
+                    modal.removeEventListener('keydown', handleKeydown);
+                    modal.removeEventListener('close', handleClose);
+                    confirmResolve = null;
+                };
+
+                // Store resolve function for external access if needed
+                confirmResolve = doResolve;
+
+                // Attach event handlers
+                okBtn.addEventListener('click', handleOk);
+                cancelBtn.addEventListener('click', handleCancel);
+                if (backdrop) backdrop.addEventListener('click', handleBackdropClick);
+                modal.addEventListener('keydown', handleKeydown);
+                modal.addEventListener('close', handleClose);
+
+                modal.showModal();
+                okBtn.focus(); // Focus OK button for keyboard accessibility
+            });
+        }
+
+        // ========== Dashboard Cache Status Loading ==========
+
+        async function loadStatusFromDashboardCache() {
+            if (!window.__TAURI__?.core?.invoke) {
+                logDebug('loadStatusFromDashboardCache: Tauri not available');
+                return;
+            }
+
+            try {
+                const { invoke } = window.__TAURI__.core;
+                const cache = await invoke('cache_get_dashboard');
+
+                if (!cache?.serversData || !Array.isArray(cache.serversData)) {
+                    logDebug('loadStatusFromDashboardCache: No cached data');
+                    return;
+                }
+
+                const cachedAt = cache.cachedAt ? new Date(cache.cachedAt).getTime() : 0;
+                const cacheAge = Date.now() - cachedAt;
+                const isStale = cacheAge > 180000; // 3 minutes
+
+                let statusCount = 0;
+                cache.serversData.forEach(server => {
+                    if (!server?.name) return;
+                    const hostName = normalizeHostName(server.name);
+                    if (!hostName) return;
+
+                    // Extract status from dashboard cache
+                    const isOnline = server.online === true;
+                    const heartbeat = server.heartbeat || {};
+                    const winrmOk = heartbeat.winrm_ok !== false && isOnline;
+                    const pingOk = heartbeat.ping_ok || isOnline;
+
+                    hostStatusMap.set(hostName, {
+                        status: {
+                            ping_ok: pingOk,
+                            winrm_ok: winrmOk,
+                            winrm_error: server.error || heartbeat.winrm_error || null
+                        },
+                        timestamp: cachedAt || Date.now(),
+                        checking: false,
+                        fromCache: true,
+                        stale: isStale
+                    });
+                    statusCount++;
+                });
+
+                const ageStr = cacheAge < 60000 ? `${Math.round(cacheAge / 1000)}s` : `${Math.round(cacheAge / 60000)}m`;
+                logDebug(`loadStatusFromDashboardCache: Loaded ${statusCount} statuses (age: ${ageStr}, stale: ${isStale})`);
+            } catch (err) {
+                logDebug(`loadStatusFromDashboardCache: Failed - ${err}`);
+            }
+        }
+
+        // ========== End Confirmation Dialog & Cache Functions ==========
+
+        function queueSettingsSave(payload) {
+            if (!window.__TAURI__?.core?.invoke) return;
+            queueSettingsSave._fn = queueSettingsSave._fn || debounce((body) => {
+                console.log('[Hosts] Saving settings, payload keys:', Object.keys(body));
+                window.__TAURI__.core.invoke('settings_set_all', { payload: body }).catch((err) => {
+                    console.error('[Hosts] settings_set_all failed:', err, 'payload:', body);
+                });
+            }, 200);
+            queueSettingsSave._fn(payload);
+        }
+
+        function settingsPayload() {
+            return {
+                qp_settings: settingsBundle.qp_settings,
+                qp_server_order: settingsBundle.qp_server_order,
+                qp_host_view_mode: settingsBundle.qp_host_view_mode,
+                qp_hosts_changed: settingsBundle.qp_hosts_changed,
+                qp_mode: null,
+                qp_remote_api_base: null,
+            };
+        }
+
+        function markHostsChanged() {
+            settingsBundle.qp_hosts_changed = Date.now().toString();
+            queueSettingsSave(settingsPayload());
+        }
+
+        function revealApp() {
+            if (window.__qpPreloadTimer) {
+                clearTimeout(window.__qpPreloadTimer);
+                window.__qpPreloadTimer = null;
+            }
+            if (typeof window.__qpRevealSettings === 'function') {
+                window.__qpRevealSettings();
+            } else {
+                document.documentElement.classList.remove('qp-preload');
+            }
+        }
+
+        function readLocalSettingsSnapshot() {
+            const snapshot = settingsDefaultBundle();
+            try {
+                const raw = localStorage.getItem(SETTINGS_KEY);
+                if (raw) snapshot.qp_settings = JSON.parse(raw);
+            } catch (e) { /* ignore */ }
+            try {
+                const raw = localStorage.getItem(HOSTS_CHANGED_KEY);
+                if (raw) snapshot.qp_hosts_changed = JSON.parse(raw);
+            } catch (e) { /* ignore */ }
+            return snapshot;
+        }
+
+        async function primeSettingsFromBackend() {
+            const fallbackSnapshot = readLocalSettingsSnapshot();
+            settingsBundle = { ...fallbackSnapshot };
+            if (!window.__TAURI__?.core?.invoke) {
+                console.warn('settings_get_all unavailable; using fallback snapshot');
+                return { usedFallback: true };
+            }
+            try {
+                const { invoke } = window.__TAURI__.core;
+                const bundle = await invoke('settings_get_all');
+                settingsBundle = {
+                    qp_settings: bundle?.qp_settings || fallbackSnapshot.qp_settings,
+                    qp_server_order: bundle?.qp_server_order || fallbackSnapshot.qp_server_order,
+                    qp_host_view_mode: bundle?.qp_host_view_mode || fallbackSnapshot.qp_host_view_mode,
+                    qp_hosts_changed: bundle?.qp_hosts_changed ?? fallbackSnapshot.qp_hosts_changed,
+                };
+
+                // Sync backend settings to localStorage so other windows see correct theme
+                try {
+                    if (settingsBundle.qp_settings) {
+                        localStorage.setItem(SETTINGS_KEY, JSON.stringify(settingsBundle.qp_settings));
+                    }
+                } catch (e) {
+                    console.warn('[Hosts] Failed to sync settings to localStorage:', e);
+                }
+
+                return { usedFallback: false };
+            } catch (err) {
+                console.warn('settings_get_all failed; using fallback snapshot', err);
+                return { usedFallback: true };
+            }
+        }
+
+        function snapshotHosts() {
+            return hosts.map(h => ({
+                ...h,
+                services: Array.isArray(h.services) ? [...h.services] : []
+            }));
+        }
+
+        function disableAutocompleteAll() {
+            document.querySelectorAll('input, textarea').forEach(el => {
+                el.setAttribute('autocomplete', 'off');
+                if (el.getAttribute('type') === 'text') {
+                    el.setAttribute('spellcheck', 'false');
+                }
+            });
+        }
+
+        const SERVICE_TEMPLATES = [
+            { key: '', label: 'Choose a template...', services: [] },
+            {
+                key: 'dc',
+                label: 'Domain Controller',
+                services: ['NetLogon', 'DNS', 'KDC', 'NTDS', 'DFSR', 'W32Time', 'WinRM']
+            },
+            {
+                key: 'sql',
+                label: 'MS SQL Server',
+                services: ['MSSQLSERVER', 'SQLSERVERAGENT', 'WinRM']
+            },
+            {
+                key: 'iis',
+                label: 'IIS Web Server',
+                services: ['W3SVC', 'WAS', 'WinRM']
+            },
+            {
+                key: 'fileserver',
+                label: 'File Server',
+                services: ['LanmanServer', 'WinRM']
+            },
+            {
+                key: 'rdg',
+                label: 'RDS Gateway',
+                services: ['TSGateway', 'WinRM']
+            },
+            {
+                key: 'rdsh',
+                label: 'RDS Session Host',
+                services: ['TermService', 'SessionEnv', 'UmRdpService', 'WinRM']
+            },
+            {
+                key: 'dhcp',
+                label: 'DHCP Server',
+                services: ['DHCPServer', 'WinRM']
+            },
+            {
+                key: 'dns',
+                label: 'DNS Server',
+                services: ['DNS', 'WinRM']
+            },
+            {
+                key: 'adcs',
+                label: 'AD Certificate Services',
+                services: ['CertSvc', 'WinRM']
+            },
+            {
+                key: 'hyperv',
+                label: 'Hyper-V Host',
+                services: ['VMMS', 'VMCompute', 'WinRM']
+            },
+            {
+                key: 'print',
+                label: 'Print Server',
+                services: ['Spooler', 'WinRM']
+            }
+        ];
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            logDebug('hosts.html: page init START');
+
+            try {
+                await primeSettingsFromBackend();
+                disableAutocompleteAll();
+
+                const backBtn = document.getElementById('back-dashboard');
+                if (backBtn) {
+                    backBtn.addEventListener('click', async () => {
+                        if (editDirty) {
+                            const confirmed = await showConfirmDialog(
+                                'You have unsaved changes in the form. Are you sure you want to leave?',
+                                { title: 'Unsaved Changes', okText: 'Leave', okClass: 'btn-warning' }
+                            );
+                            if (!confirmed) return;
+                        }
+                        if (hostsChanged) {
+                            markHostsChanged();
+                            // Wait for debounced settings save (200ms) + buffer before navigating
+                            await new Promise(resolve => setTimeout(resolve, 500));
+                        }
+                        window.location.href = 'dashboard-all.html';
+                    });
+                }
+
+                document.getElementById('delete-all-hosts').addEventListener('click', openDeleteAllModal);
+                document.getElementById('scan-ad').addEventListener('click', openScanModal);
+                document.getElementById('check-status-all').addEventListener('click', checkAllHostsStatus);
+                document.getElementById('cancel-edit').addEventListener('click', () => cancelEdit());
+                document.getElementById('host-form').addEventListener('submit', onSubmit);
+                document.getElementById('host-form').addEventListener('input', markFormDirty);
+                document.getElementById('scan-close').addEventListener('click', closeScanModal);
+                document.getElementById('scan-cancel').addEventListener('click', closeScanModal);
+                document.getElementById('scan-form').addEventListener('submit', runScan);
+                document.getElementById('delete-close').addEventListener('click', closeDeleteAllModal);
+                document.getElementById('delete-cancel').addEventListener('click', closeDeleteAllModal);
+                document.getElementById('delete-confirm').addEventListener('click', confirmDeleteAll);
+                initServiceTemplates();
+                initServiceBrowser();
+                initGroupDropdown();
+                const deleteInput = document.getElementById('delete-confirm-input');
+                if (deleteInput) {
+                    deleteInput.addEventListener('keyup', (e) => {
+                        if (e.key === 'Enter') {
+                            confirmDeleteAll();
+                        }
+                    });
+                }
+
+                const searchInput = document.getElementById('host-search');
+                const clearSearch = document.getElementById('clear-host-search');
+                if (searchInput) {
+                    searchInput.addEventListener('input', (e) => {
+                        searchTerm = e.target.value || '';
+                        renderHosts();
+                    });
+                }
+                if (clearSearch) {
+                    clearSearch.addEventListener('click', () => {
+                        if (!searchInput) return;
+                        searchTerm = '';
+                        searchInput.value = '';
+                        searchInput.focus();
+                        renderHosts();
+                    });
+                }
+
+                await loadHosts();
+
+                logDebug('hosts.html: page init COMPLETE');
+
+                // Set up unified theme update listeners AFTER all Tauri operations complete
+                // Add small delay to let Tauri's callback queue settle
+                setTimeout(() => {
+                    if (window.ThemeModule?.subscribeToThemeUpdates) {
+                        // Pass theme from settingsBundle (loaded from backend) for consistency
+                        const themeFromSettings = settingsBundle?.qp_settings?.theme || 'system';
+                        window.ThemeModule.subscribeToThemeUpdates(themeFromSettings);
+                    }
+                }, 100);
+            } catch (err) {
+                logDebug(`hosts.html: page init FAILED: ${err}`);
+                console.error('Hosts init failed', err);
+            } finally {
+                revealApp();
+            }
+        });
+
+        async function openScanModal() {
+            if (editDirty) {
+                const confirmed = await showConfirmDialog(
+                    'You have unsaved changes in the host form. Continue with AD scan? (Unsaved changes will be lost if you do not save first)',
+                    { title: 'Unsaved Changes', okText: 'Continue', okClass: 'btn-warning' }
+                );
+                if (!confirmed) return;
+            }
+            if (hosts.length > 0) {
+                // Provide context about what scan will do
+                const hasWindows = hosts.some(h => (h.os || 'Windows') === 'Windows');
+                if (hasWindows) {
+                    const msg = 'AD scan will merge discovered servers with your existing hosts. Existing Windows hosts not found in AD will be removed unless you check the "keep existing" option.';
+                    const confirmed = await showConfirmDialog(
+                        msg,
+                        { title: 'AD Scan Warning', okText: 'Continue', okClass: 'btn-primary' }
+                    );
+                    if (!confirmed) return;
+                }
+            }
+            document.getElementById('scan-modal').showModal();
+            document.getElementById('scan-domain').focus();
+        }
+
+        function closeScanModal() {
+            const modal = document.getElementById('scan-modal');
+            if (modal) modal.close();
+            document.getElementById('scan-domain').value = '';
+            document.getElementById('scan-dc').value = '';
+            const keepBox = document.getElementById('scan-keep-existing');
+            if (keepBox) keepBox.checked = false;
+            setScanBusy(false);
+        }
+
+        function setScanBusy(busy) {
+            const btn = document.getElementById('scan-run');
+            btn.disabled = busy;
+            btn.textContent = busy ? 'Scanning…' : 'Start Scan';
+        }
+
+        async function runScan(event) {
+            event.preventDefault();
+
+            if (saveBusy) {
+                showBanner('error', 'Please wait for current operation to complete');
+                return;
+            }
+
+            if (!window.__TAURI__) {
+                showBanner('error', 'Tauri API not available');
+                return;
+            }
+
+            const domain = document.getElementById('scan-domain').value.trim();
+            const dc = document.getElementById('scan-dc').value.trim();
+            const keepExisting = !!document.getElementById('scan-keep-existing')?.checked;
+
+            if (!domain || !dc) {
+                showBanner('error', 'Domain and domain controller are required');
+                return;
+            }
+            if (!isLikelyDomain(domain)) {
+                showBanner('error', 'Enter a valid domain (e.g., contoso.com)');
+                return;
+            }
+            if (!isLikelyFqdn(dc)) {
+                showBanner('error', 'Enter a valid domain controller FQDN (e.g., dc01.contoso.com)');
+                return;
+            }
+            if (!dc.toLowerCase().endsWith('.' + domain.toLowerCase())) {
+                showBanner('error', `Domain controller must belong to ${domain}`);
+                return;
+            }
+
+            const start = Date.now();
+            logDebug(`hosts.html: scan_domain START domain='${domain}' dc='${dc}' skip=${keepExisting}`);
+
+            setScanBusy(true);
+            try {
+                const { invoke } = window.__TAURI__.core;
+                const result = await invoke('scan_domain', { domain, server: dc, skip_delete: keepExisting });
+
+                const elapsed = Date.now() - start;
+                closeScanModal();
+
+                // Clear form dirty state since we're reloading
+                editDirty = false;
+                editingName = null;
+
+                await loadHosts();
+                const found = result?.found ?? 0;
+                const created = result?.created ?? 0;
+                const removed = result?.removed ?? 0;
+                const summaryParts = [
+                    `${found} host${found === 1 ? '' : 's'} found`,
+                    `${created} created`,
+                    keepExisting ? 'removal skipped (keep existing checked)' : `${removed} removed`
+                ];
+
+                // Mark hosts as changed so dashboard refreshes
+                if (created > 0 || removed > 0) {
+                    hostsChanged = true;
+                    markHostsChanged();
+                }
+
+                logDebug(`hosts.html: scan_domain SUCCESS ${elapsed}ms found=${found} created=${created} removed=${removed}`);
+                showBanner('success', `AD scan complete. ${summaryParts.join(' | ')}.`);
+            } catch (err) {
+                const elapsed = Date.now() - start;
+                logDebug(`hosts.html: scan_domain FAILED ${elapsed}ms: ${err}`);
+                showBanner('error', `AD scan failed: ${err}`);
+            } finally {
+                setScanBusy(false);
+            }
+        }
+
+        async function loadHosts() {
+            const start = Date.now();
+            logDebug('hosts.html: loadHosts START');
+
+            if (!window.__TAURI__) {
+                showBanner('error', 'Tauri API not available');
+                return;
+            }
+            try {
+                const { invoke } = window.__TAURI__.core;
+                const result = await invoke('get_hosts');
+                const elapsed = Date.now() - start;
+
+                hosts = (result || []).map(h => {
+                    const normalizedName = normalizeHostName(h.name || '');
+                    if (!normalizedName) return null;
+                    return {
+                        name: normalizedName,
+                        notes: h.notes || '',
+                        box: h.group || h.box || '',
+                        services: Array.isArray(h.services) ? h.services : [],
+                        os: normalizeOs(h.os_type || h.os || h.osType)
+                    };
+                }).filter(Boolean);
+
+                const seen = new Set();
+                hosts = hosts.filter(h => {
+                    if (seen.has(h.name)) return false;
+                    seen.add(h.name);
+                    return true;
+                });
+
+                // Load cached status from dashboard (non-blocking)
+                await loadStatusFromDashboardCache();
+
+                renderHosts();
+                startEdit(null);
+                hostsChanged = false;
+                editDirty = false;
+
+                // Build status summary for banner
+                let online = 0, offline = 0, unknown = 0;
+                hosts.forEach(h => {
+                    const entry = hostStatusMap.get(h.name);
+                    if (!entry) { unknown++; return; }
+                    const status = entry.status;
+                    if (status?.winrm_ok || status?.ping_ok) online++;
+                    else offline++;
+                });
+                const statusSummary = hostStatusMap.size > 0
+                    ? ` | Status: ${online} online, ${offline} offline${unknown > 0 ? `, ${unknown} unknown` : ''}`
+                    : '';
+
+                logDebug(`hosts.html: loadHosts SUCCESS ${hosts.length} in ${elapsed}ms`);
+                showBanner('success', `Loaded ${hosts.length} host${hosts.length === 1 ? '' : 's'}${statusSummary}`);
+            } catch (err) {
+                const elapsed = Date.now() - start;
+                logDebug(`hosts.html: loadHosts FAILED ${elapsed}ms: ${err}`);
+                showBanner('error', `Failed to load hosts: ${err}`);
+            }
+        }
+
+        function renderHosts() {
+            const list = document.getElementById('host-list');
+            list.innerHTML = '';
+            const term = (searchTerm || '').trim().toLowerCase();
+            const filtered = hosts.filter((h) => {
+                if (!term) return true;
+                const name = (h.name || '').toLowerCase();
+                const notes = (h.notes || '').toLowerCase();
+                const box = (h.box || '').toLowerCase();
+                return name.includes(term) || notes.includes(term) || box.includes(term);
+            });
+
+            if (!filtered.length) {
+                const empty = document.createElement('div');
+                empty.className = 'text-base-content/60 text-center py-8';
+                empty.textContent = term ? 'No hosts match your search.' : 'No hosts found. Add one to begin.';
+                list.appendChild(empty);
+                return;
+            }
+
+            filtered.forEach((host) => {
+                const card = document.createElement('div');
+                card.className = 'card bg-base-100 shadow-md hover:shadow-lg transition-shadow';
+                const services = (host.services || []).filter(Boolean);
+                const box = host.box ? `<span class="badge badge-primary">${escapeHtml(host.box)}</span>` : '';
+                const osPill = `<span class="badge badge-ghost">${escapeHtml(host.os || 'Windows')}</span>`;
+                const statusBadge = getHostStatusBadge(host.name);
+
+                const cardBody = document.createElement('div');
+                cardBody.className = 'card-body';
+                cardBody.innerHTML = `
+                        <div class="flex items-center justify-between">
+                            <h3 class="card-title text-lg"><span class="inline">${highlightMatch(host.name, term)}</span></h3>
+                            ${statusBadge}
+                        </div>
+                        <p class="text-sm text-base-content/70">${highlightMatch(host.notes || 'No notes', term)}</p>
+                        <div class="flex gap-2 flex-wrap my-2">${osPill}${box ? box : ''}</div>
+                        <div class="flex gap-2 flex-wrap">
+                            ${services.length ? services.map(s => `<span class="badge badge-outline badge-sm">${escapeHtml(s)}</span>`).join('') : '<span class="text-sm text-base-content/50">No critical services set</span>'}
+                        </div>
+                    `;
+
+                const actions = document.createElement('div');
+                actions.className = 'card-actions justify-end mt-2';
+                const checkBtn = document.createElement('button');
+                checkBtn.className = 'btn btn-ghost btn-sm';
+                checkBtn.textContent = 'Check';
+                checkBtn.onclick = () => checkHostStatus(host.name, true);
+                const editBtn = document.createElement('button');
+                editBtn.className = 'btn btn-ghost btn-sm';
+                editBtn.textContent = 'Edit';
+                editBtn.onclick = () => startEdit(host.name);
+                const deleteBtn = document.createElement('button');
+                deleteBtn.className = 'btn btn-ghost btn-sm text-error';
+                deleteBtn.textContent = 'Delete';
+                deleteBtn.onclick = () => deleteHost(host.name);
+                actions.appendChild(checkBtn);
+                actions.appendChild(editBtn);
+                actions.appendChild(deleteBtn);
+                cardBody.appendChild(actions);
+                card.appendChild(cardBody);
+                list.appendChild(card);
+            });
+        }
+
+        function markFormDirty() {
+            if (saveBusy) return;
+            const currentSnapshot = captureFormSnapshot();
+            if (currentSnapshot !== lastSaveSnapshot) {
+                editDirty = true;
+            }
+        }
+
+        function captureFormSnapshot() {
+            return JSON.stringify({
+                name: document.getElementById('host-name').value,
+                notes: document.getElementById('host-notes').value,
+                box: getSelectedGroup(),
+                os: document.getElementById('host-os')?.value,
+                services: document.getElementById('host-services').value
+            });
+        }
+
+        function clearFormDirty() {
+            editDirty = false;
+            lastSaveSnapshot = captureFormSnapshot();
+        }
+
+        async function cancelEdit() {
+            if (editDirty) {
+                const confirmed = await showConfirmDialog(
+                    'Discard unsaved changes?',
+                    { title: 'Discard Changes', okText: 'Discard', okClass: 'btn-warning' }
+                );
+                if (!confirmed) return;
+            }
+            startEdit(null);
+        }
+
+        function startEdit(name) {
+            editingName = name ? normalizeHostName(name) : null;
+            const title = document.getElementById('form-title');
+            hideNewGroupInput();
+            if (!name) {
+                title.textContent = 'Add Host';
+                document.getElementById('host-name').value = '';
+                document.getElementById('host-notes').value = '';
+                populateGroupDropdown('');
+                const osSelect = document.getElementById('host-os');
+                if (osSelect) osSelect.value = 'Windows';
+                document.getElementById('host-services').value = '';
+                resetTemplateSelect();
+                clearFormDirty();
+                updateBrowseServicesButton();
+                return;
+            }
+            const host = hosts.find(h => h.name === editingName);
+            if (!host) return;
+            title.textContent = `Edit ${host.name}`;
+            document.getElementById('host-name').value = host.name;
+            document.getElementById('host-notes').value = host.notes || '';
+            populateGroupDropdown(host.box || '');
+            const osSelect = document.getElementById('host-os');
+            if (osSelect) osSelect.value = host.os || 'Windows';
+            document.getElementById('host-services').value = (host.services || []).join('; ');
+            resetTemplateSelect();
+            clearFormDirty();
+            updateBrowseServicesButton();
+        }
+
+        function initServiceTemplates() {
+            const select = document.getElementById('service-template');
+            if (!select) return;
+            select.innerHTML = '';
+            SERVICE_TEMPLATES.forEach(t => {
+                const opt = document.createElement('option');
+                opt.value = t.key;
+                opt.textContent = t.label;
+                select.appendChild(opt);
+            });
+            select.addEventListener('change', () => applyTemplate(select.value));
+        }
+
+        function resetTemplateSelect() {
+            const select = document.getElementById('service-template');
+            if (select) {
+                select.value = '';
+            }
+        }
+
+        // ========== Service Browser Functions ==========
+
+        function initServiceBrowser() {
+            const browseBtn = document.getElementById('browse-services-btn');
+            const closeBtn = document.getElementById('service-browser-close');
+            const cancelBtn = document.getElementById('service-browser-cancel');
+            const addBtn = document.getElementById('service-browser-add');
+            const searchInput = document.getElementById('service-browser-search');
+            const statusFilter = document.getElementById('service-browser-status-filter');
+            const selectVisibleBtn = document.getElementById('service-browser-select-visible');
+            const deselectAllBtn = document.getElementById('service-browser-deselect-all');
+            const thead = document.querySelector('#service-browser-modal thead');
+            const osSelect = document.getElementById('host-os');
+            const hostNameInput = document.getElementById('host-name');
+
+            if (browseBtn) {
+                browseBtn.addEventListener('click', openServiceBrowser);
+            }
+
+            // Update browse button state when OS or host name changes
+            if (osSelect) {
+                osSelect.addEventListener('change', updateBrowseServicesButton);
+            }
+            if (hostNameInput) {
+                hostNameInput.addEventListener('input', debounce(updateBrowseServicesButton, 200));
+            }
+            if (closeBtn) {
+                closeBtn.addEventListener('click', closeServiceBrowser);
+            }
+            if (cancelBtn) {
+                cancelBtn.addEventListener('click', closeServiceBrowser);
+            }
+            if (addBtn) {
+                addBtn.addEventListener('click', addSelectedServices);
+            }
+            if (searchInput) {
+                searchInput.addEventListener('input', debounce(renderServiceBrowserTable, 150));
+            }
+            if (statusFilter) {
+                statusFilter.addEventListener('change', renderServiceBrowserTable);
+            }
+            if (selectVisibleBtn) {
+                selectVisibleBtn.addEventListener('click', selectVisibleServices);
+            }
+            if (deselectAllBtn) {
+                deselectAllBtn.addEventListener('click', deselectAllServices);
+            }
+            if (thead) {
+                thead.addEventListener('click', (e) => {
+                    const th = e.target.closest('th[data-sort]');
+                    if (!th) return;
+                    const key = th.dataset.sort;
+                    if (serviceBrowserSortKey === key) {
+                        serviceBrowserSortAsc = !serviceBrowserSortAsc;
+                    } else {
+                        serviceBrowserSortKey = key;
+                        serviceBrowserSortAsc = true;
+                    }
+                    renderServiceBrowserTable();
+                });
+            }
+        }
+
+        function updateBrowseServicesButton() {
+            const btn = document.getElementById('browse-services-btn');
+            if (!btn) return;
+
+            const osSelect = document.getElementById('host-os');
+            const hostNameInput = document.getElementById('host-name');
+            const isWindows = (osSelect?.value || 'Windows') === 'Windows';
+            const hasHostName = (hostNameInput?.value || '').trim().length > 0;
+
+            // Enable when editing/adding a Windows host with a valid name
+            btn.disabled = !isWindows || !hasHostName;
+            btn.title = !isWindows
+                ? 'Service browsing is only available for Windows hosts'
+                : !hasHostName
+                    ? 'Enter a server name first'
+                    : 'Browse services on this host';
+        }
+
+        async function openServiceBrowser() {
+            if (serviceBrowserBusy) return;
+
+            const hostNameInput = document.getElementById('host-name');
+            const serverName = (hostNameInput?.value || '').trim();
+            if (!serverName) {
+                showBanner('error', 'Server name is required to browse services');
+                return;
+            }
+
+            const modal = document.getElementById('service-browser-modal');
+            const hostSpan = document.getElementById('service-browser-host');
+            const loadingDiv = document.getElementById('service-browser-loading');
+            const contentDiv = document.getElementById('service-browser-content');
+            const messageDiv = document.getElementById('service-browser-message');
+            const addBtn = document.getElementById('service-browser-add');
+
+            if (!modal) return;
+
+            // Reset state
+            serviceBrowserData = [];
+            serviceBrowserSelected = new Set();
+            serviceBrowserSortKey = 'name';
+            serviceBrowserSortAsc = true;
+
+            // Pre-select currently configured services
+            const currentServices = parseServicesText(document.getElementById('host-services')?.value || '');
+            currentServices.forEach(svc => serviceBrowserSelected.add(svc.toLowerCase()));
+
+            // Reset UI
+            hostSpan.textContent = serverName;
+            messageDiv.className = 'alert hidden mb-3';
+            messageDiv.textContent = '';
+            loadingDiv.classList.remove('hidden');
+            contentDiv.classList.add('hidden');
+            addBtn.disabled = true;
+
+            // Reset filters
+            const searchInput = document.getElementById('service-browser-search');
+            const statusFilter = document.getElementById('service-browser-status-filter');
+            if (searchInput) searchInput.value = '';
+            if (statusFilter) statusFilter.value = '';
+
+            // Show modal using native dialog API
+            modal.showModal();
+            serviceBrowserBusy = true;
+
+            try {
+                if (!window.__TAURI__) {
+                    throw new Error('Tauri API not available');
+                }
+                const { invoke } = window.__TAURI__.core;
+                const services = await invoke('get_remote_services', { serverName });
+                serviceBrowserData = services || [];
+
+                loadingDiv.classList.add('hidden');
+                contentDiv.classList.remove('hidden');
+
+                renderServiceBrowserTable();
+                updateServiceBrowserCounts();
+
+                if (serviceBrowserData.length === 0) {
+                    showServiceBrowserMessage('warning', 'No services found on this host');
+                }
+            } catch (err) {
+                loadingDiv.classList.add('hidden');
+                showServiceBrowserMessage('error', `Failed to retrieve services: ${err}`);
+                logDebug(`openServiceBrowser failed: ${err}`);
+            } finally {
+                serviceBrowserBusy = false;
+            }
+        }
+
+        function closeServiceBrowser() {
+            const modal = document.getElementById('service-browser-modal');
+            if (modal) {
+                modal.close();
+            }
+            serviceBrowserBusy = false;
+        }
+
+        function showServiceBrowserMessage(type, message) {
+            const messageDiv = document.getElementById('service-browser-message');
+            if (!messageDiv) return;
+
+            messageDiv.className = `alert mb-3 alert-${type === 'error' ? 'error' : type === 'warning' ? 'warning' : 'info'}`;
+            messageDiv.textContent = message;
+        }
+
+        function getFilteredSortedServices() {
+            const searchInput = document.getElementById('service-browser-search');
+            const statusFilter = document.getElementById('service-browser-status-filter');
+            const searchTerm = (searchInput?.value || '').toLowerCase().trim();
+            const statusFilterValue = statusFilter?.value || '';
+
+            let filtered = serviceBrowserData;
+
+            // Apply search filter
+            if (searchTerm) {
+                filtered = filtered.filter(svc =>
+                    svc.name.toLowerCase().includes(searchTerm) ||
+                    svc.display_name.toLowerCase().includes(searchTerm)
+                );
+            }
+
+            // Apply status filter
+            if (statusFilterValue) {
+                filtered = filtered.filter(svc => svc.status === statusFilterValue);
+            }
+
+            // Sort
+            filtered.sort((a, b) => {
+                let aVal = a[serviceBrowserSortKey] || '';
+                let bVal = b[serviceBrowserSortKey] || '';
+                if (typeof aVal === 'string') aVal = aVal.toLowerCase();
+                if (typeof bVal === 'string') bVal = bVal.toLowerCase();
+
+                if (aVal < bVal) return serviceBrowserSortAsc ? -1 : 1;
+                if (aVal > bVal) return serviceBrowserSortAsc ? 1 : -1;
+                return 0;
+            });
+
+            return filtered;
+        }
+
+        function renderServiceBrowserTable() {
+            const tbody = document.getElementById('service-browser-tbody');
+            if (!tbody) return;
+
+            const filtered = getFilteredSortedServices();
+
+            // Update sort indicators
+            document.querySelectorAll('#service-browser-modal th[data-sort]').forEach(th => {
+                const indicator = th.querySelector('.sort-indicator');
+                if (th.dataset.sort === serviceBrowserSortKey) {
+                    indicator.textContent = serviceBrowserSortAsc ? ' ▲' : ' ▼';
+                } else {
+                    indicator.textContent = '';
+                }
+            });
+
+            // Update count display
+            document.getElementById('service-browser-count').textContent = filtered.length;
+
+            if (filtered.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="6" class="text-center text-base-content/60 py-8">No services match your filters</td></tr>`;
+                return;
+            }
+
+            tbody.innerHTML = filtered.map(svc => {
+                const isSelected = serviceBrowserSelected.has(svc.name.toLowerCase());
+                const statusClass = svc.status === 'Running' ? 'badge-success' : 'badge-error';
+                const startupClass = svc.startup_type === 'Automatic' ? 'text-success' : '';
+
+                return `
+                    <tr class="hover cursor-pointer ${isSelected ? 'bg-primary/10' : ''}" data-service="${escapeHtml(svc.name)}">
+                        <td class="text-center">
+                            <input type="checkbox" class="checkbox checkbox-sm checkbox-primary service-checkbox"
+                                   ${isSelected ? 'checked' : ''} data-service="${escapeHtml(svc.name)}">
+                        </td>
+                        <td class="font-mono text-sm">${escapeHtml(svc.name)}</td>
+                        <td>${escapeHtml(svc.display_name)}</td>
+                        <td><span class="badge badge-sm ${statusClass}">${escapeHtml(svc.status)}</span></td>
+                        <td class="${startupClass}">${escapeHtml(svc.startup_type)}</td>
+                        <td class="text-sm text-base-content/80">${escapeHtml(svc.service_account || 'Unknown')}</td>
+                    </tr>
+                `;
+            }).join('');
+
+            // Add click handlers for rows and checkboxes
+            tbody.querySelectorAll('tr[data-service]').forEach(row => {
+                row.addEventListener('click', (e) => {
+                    if (e.target.type === 'checkbox') return; // Let checkbox handle itself
+                    const serviceName = row.dataset.service;
+                    toggleServiceSelection(serviceName);
+                });
+            });
+
+            tbody.querySelectorAll('.service-checkbox').forEach(checkbox => {
+                checkbox.addEventListener('change', (e) => {
+                    e.stopPropagation();
+                    const serviceName = checkbox.dataset.service;
+                    toggleServiceSelection(serviceName);
+                });
+            });
+
+            updateServiceBrowserCounts();
+        }
+
+        function toggleServiceSelection(serviceName) {
+            const key = serviceName.toLowerCase();
+            if (serviceBrowserSelected.has(key)) {
+                serviceBrowserSelected.delete(key);
+            } else {
+                serviceBrowserSelected.add(key);
+            }
+            renderServiceBrowserTable();
+            updateServiceBrowserCounts();
+        }
+
+        function selectVisibleServices() {
+            const filtered = getFilteredSortedServices();
+            filtered.forEach(svc => serviceBrowserSelected.add(svc.name.toLowerCase()));
+            renderServiceBrowserTable();
+            updateServiceBrowserCounts();
+        }
+
+        function deselectAllServices() {
+            serviceBrowserSelected.clear();
+            renderServiceBrowserTable();
+            updateServiceBrowserCounts();
+        }
+
+        function updateServiceBrowserCounts() {
+            const selectedCount = serviceBrowserSelected.size;
+            document.getElementById('service-browser-selected-count').textContent = selectedCount;
+
+            const addBtn = document.getElementById('service-browser-add');
+            if (addBtn) {
+                addBtn.disabled = selectedCount === 0;
+                addBtn.textContent = selectedCount > 0 ? `Add Selected (${selectedCount})` : 'Add Selected';
+            }
+        }
+
+        function addSelectedServices() {
+            if (serviceBrowserSelected.size === 0) return;
+
+            // Get the original service names (preserve case from data)
+            const selectedNames = [];
+            serviceBrowserData.forEach(svc => {
+                if (serviceBrowserSelected.has(svc.name.toLowerCase())) {
+                    selectedNames.push(svc.name);
+                }
+            });
+
+            // Merge with existing services
+            const textarea = document.getElementById('host-services');
+            if (textarea) {
+                const current = parseServicesText(textarea.value);
+                const merged = mergeServices(current, selectedNames);
+                textarea.value = merged.join('; ');
+                markFormDirty();
+            }
+
+            closeServiceBrowser();
+            showBanner('success', `Added ${selectedNames.length} service(s) to monitoring list`);
+        }
+
+        // ========== End Service Browser Functions ==========
+
+        function applyTemplate(key) {
+            const template = SERVICE_TEMPLATES.find(t => t.key === key);
+            if (!template) return;
+            const textarea = document.getElementById('host-services');
+            if (!textarea) return;
+            if (!template.services.length) {
+                textarea.value = '';
+                return;
+            }
+            const current = parseServicesText(textarea.value);
+            const merged = mergeServices(current, template.services);
+            textarea.value = merged.join('; ');
+        }
+
+        function parseServicesText(value) {
+            const seen = new Set();
+            const items = [];
+            (value || '').split(/;|,/).map(s => s.trim()).filter(Boolean).forEach(svc => {
+                const key = svc.toLowerCase();
+                if (!seen.has(key)) {
+                    seen.add(key);
+                    items.push(svc);
+                }
+            });
+            return items;
+        }
+
+        function mergeServices(existing, incoming) {
+            const seen = new Set(existing.map(s => s.toLowerCase()));
+            const merged = [...existing];
+            incoming.forEach(svc => {
+                const key = (svc || '').toLowerCase();
+                if (key && !seen.has(key)) {
+                    seen.add(key);
+                    merged.push(svc);
+                }
+            });
+            return merged;
+        }
+
+        function normalizeOs(raw) {
+            const val = (raw || '').toString().trim().toLowerCase();
+            if (val === 'linux' || val === 'lin') return 'Linux';
+            return 'Windows';
+        }
+
+        async function onSubmit(event) {
+            event.preventDefault();
+
+            // Prevent double-submission
+            if (saveBusy) {
+                showBanner('error', 'Save already in progress');
+                return;
+            }
+
+            const previous = snapshotHosts();
+            const previousEditing = editingName;
+            const rawName = document.getElementById('host-name').value;
+            const normalizedName = normalizeHostName(rawName);
+            const notes = document.getElementById('host-notes').value.trim();
+            const box = getSelectedGroup();
+            const servicesRaw = document.getElementById('host-services').value;
+            const os = normalizeOs(document.getElementById('host-os')?.value || 'Windows');
+
+            if (!normalizedName) {
+                showBanner('error', 'Server name is required');
+                return;
+            }
+
+            const services = parseServicesText(servicesRaw);
+            document.getElementById('host-name').value = normalizedName;
+
+            // Case-insensitive duplicate check
+            const normalizedLower = normalizedName.toLowerCase();
+            const duplicateIndex = hosts.findIndex(h => h.name.toLowerCase() === normalizedLower);
+
+            // If we found a duplicate and we're either:
+            // 1. Adding a new host (not editing), or
+            // 2. Editing but the duplicate is a different host than the one we're editing
+            if (duplicateIndex !== -1) {
+                const isDifferentHost = !editingName || hosts[duplicateIndex].name !== editingName;
+                if (isDifferentHost) {
+                    showBanner('error', `Server name must be unique (conflicts with '${hosts[duplicateIndex].name}')`);
+                    return;
+                }
+            }
+
+            if (editingName) {
+                const idx = hosts.findIndex(h => h.name === editingName);
+                if (idx !== -1) {
+                    hosts[idx] = { name: normalizedName, notes, box, services, os };
+                } else {
+                    // Editing host no longer exists - treat as new
+                    hosts.push({ name: normalizedName, notes, box, services, os });
+                }
+            } else {
+                hosts.push({ name: normalizedName, notes, box, services, os });
+            }
+
+            renderHosts();
+            const ok = await persistHosts('Host saved');
+            if (ok) {
+                clearFormDirty();
+                startEdit(null);
+            } else {
+                // Rollback on failure
+                hosts = previous;
+                editingName = previousEditing;
+                renderHosts();
+            }
+        }
+
+        async function deleteHost(name) {
+            const normalizedName = normalizeHostName(name);
+            if (!normalizedName) {
+                showBanner('error', 'Invalid host name');
+                return;
+            }
+
+            if (saveBusy) {
+                showBanner('error', 'Please wait for current operation to complete');
+                return;
+            }
+
+            // If currently editing this host, warn about unsaved changes
+            if (editingName === normalizedName && editDirty) {
+                const confirmed = await showConfirmDialog(
+                    `You have unsaved changes for ${normalizedName}. Delete anyway?`,
+                    { title: 'Unsaved Changes', okText: 'Delete', okClass: 'btn-error' }
+                );
+                if (!confirmed) return;
+            }
+
+            const previous = snapshotHosts();
+            const previousEditing = editingName;
+
+            hosts = hosts.filter(h => h.name !== normalizedName);
+
+            // Clear edit form if deleting the currently edited host
+            if (editingName === normalizedName) {
+                editingName = null;
+                editDirty = false;
+            }
+
+            renderHosts();
+            hostsChanged = true;
+            const ok = await persistHosts(`${normalizedName} removed`);
+            if (ok) {
+                // Only clear form if we were editing the deleted host
+                if (previousEditing === normalizedName) {
+                    startEdit(null);
+                }
+            } else {
+                // Rollback on failure
+                hosts = previous;
+                editingName = previousEditing;
+                renderHosts();
+            }
+        }
+
+        async function openDeleteAllModal() {
+            if (!hosts.length) {
+                showBanner('error', 'No hosts to delete');
+                return;
+            }
+
+            if (saveBusy) {
+                showBanner('error', 'Please wait for current operation to complete');
+                return;
+            }
+
+            if (editDirty) {
+                const confirmed = await showConfirmDialog(
+                    'You have unsaved changes in the form. Continue with delete all?',
+                    { title: 'Unsaved Changes', okText: 'Continue', okClass: 'btn-warning' }
+                );
+                if (!confirmed) return;
+            }
+
+            const modal = document.getElementById('delete-modal');
+            if (!modal) return;
+            document.getElementById('delete-confirm-input').value = '';
+            modal.showModal();
+            document.getElementById('delete-confirm-input').focus();
+        }
+
+        function closeDeleteAllModal() {
+            const modal = document.getElementById('delete-modal');
+            if (modal) {
+                modal.close();
+            }
+            deleteBusy = false;
+            const btn = document.getElementById('delete-confirm');
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = 'Delete All';
+            }
+        }
+
+        async function confirmDeleteAll() {
+            if (deleteBusy || saveBusy) return;
+            if (!hosts.length) {
+                closeDeleteAllModal();
+                showBanner('error', 'No hosts to delete');
+                return;
+            }
+
+            const input = document.getElementById('delete-confirm-input');
+            const btn = document.getElementById('delete-confirm');
+            const value = (input?.value || '').trim();
+            if (value !== 'DELETE') {
+                showBanner('error', 'Type DELETE to confirm.');
+                input?.focus();
+                return;
+            }
+
+            // Final confirmation
+            const finalConfirm = await showConfirmDialog(
+                `Are you absolutely sure? This will permanently delete all ${hosts.length} host(s).`,
+                { title: 'Final Confirmation', okText: 'Delete All', okClass: 'btn-error' }
+            );
+            if (!finalConfirm) return;
+
+            deleteBusy = true;
+            if (btn) {
+                btn.disabled = true;
+                btn.textContent = 'Deleting…';
+            }
+
+            const previous = snapshotHosts();
+            const previousEditing = editingName;
+            const previousDirty = editDirty;
+
+            hosts = [];
+            editingName = null;
+            editDirty = false;
+            renderHosts();
+
+            const ok = await persistHosts('All hosts deleted');
+            if (ok) {
+                startEdit(null);
+            } else {
+                // Rollback on failure
+                hosts = previous;
+                editingName = previousEditing;
+                editDirty = previousDirty;
+                renderHosts();
+            }
+            closeDeleteAllModal();
+        }
+
+        function showBanner(type, message) {
+            const el = document.getElementById('banner');
+            el.className = `message ${type}`;
+            el.textContent = message;
+            el.style.display = message ? 'block' : 'none';
+        }
+
+        function isLikelyDomain(value) {
+            if (!value) return false;
+            const parts = value.trim().split('.').filter(Boolean);
+            if (parts.length < 2) return false;
+            return parts.every(p => /^[a-zA-Z0-9-]{1,63}$/.test(p));
+        }
+
+        function isLikelyFqdn(value) {
+            if (!value) return false;
+            if (value.length > 253) return false;
+            return /^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)+$/.test(value.trim());
+        }
+
+        function normalizeHostName(raw) {
+            return Utils?.normalizeHostName ? Utils.normalizeHostName(raw) : '';
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text ?? '';
+            return div.innerHTML;
+        }
+
+        function escapeRegex(value) {
+            return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        }
+
+        function highlightMatch(text, term) {
+            if (!term) return escapeHtml(text);
+            const safeTerm = escapeRegex(term.trim());
+            if (!safeTerm) return escapeHtml(text);
+            const regex = new RegExp(`(${safeTerm})`, 'ig');
+            const parts = String(text ?? '').split(regex);
+            return parts.map(part => {
+                if (!part) return '';
+                if (part.toLowerCase() === term.toLowerCase()) {
+                    return `<span class="highlight">${escapeHtml(part)}</span>`;
+                }
+                return escapeHtml(part);
+            }).join('');
+        }
+
+        // ========== Host Status Checking Functions ==========
+
+        function getHostStatusBadge(hostName) {
+            const statusEntry = hostStatusMap.get(hostName);
+            if (!statusEntry) {
+                return '<span class="badge badge-ghost badge-sm gap-1">? Unknown</span>';
+            }
+            if (statusEntry.checking) {
+                return '<span class="badge badge-ghost badge-sm gap-1"><span class="loading loading-spinner loading-xs"></span> Checking</span>';
+            }
+            const { status, stale, fromCache } = statusEntry;
+            if (!status) {
+                return '<span class="badge badge-ghost badge-sm gap-1">? Unknown</span>';
+            }
+
+            // Determine online status similar to dashboard logic
+            const isOnline = !!(status.winrm_ok || status.ping_ok);
+            const hasWinrmIssue = isOnline && !status.winrm_ok && status.winrm_error;
+            const staleIndicator = stale ? ' (stale)' : '';
+            const cacheTitle = fromCache && stale ? ' title="Status may be outdated - click Refresh Status to update"' : '';
+
+            if (!isOnline) {
+                return `<span class="badge badge-error badge-sm gap-1"${cacheTitle}>Offline${staleIndicator}</span>`;
+            }
+            if (hasWinrmIssue) {
+                const errorHint = status.winrm_error ? ` title="${escapeHtml(status.winrm_error)}"` : cacheTitle;
+                return `<span class="badge badge-warning badge-sm gap-1"${errorHint}>Degraded${staleIndicator}</span>`;
+            }
+            return `<span class="badge badge-success badge-sm gap-1"${cacheTitle}>Online${staleIndicator}</span>`;
+        }
+
+        function isCachedStatusValid(hostName) {
+            const entry = hostStatusMap.get(hostName);
+            if (!entry || !entry.timestamp) return false;
+            return (Date.now() - entry.timestamp) < STATUS_CACHE_MS;
+        }
+
+        async function checkHostStatus(hostName, forceRefresh = false) {
+            if (!window.__TAURI__?.core?.invoke) return null;
+
+            // Check cache first
+            if (!forceRefresh && isCachedStatusValid(hostName)) {
+                return hostStatusMap.get(hostName).status;
+            }
+
+            // Mark as checking
+            hostStatusMap.set(hostName, {
+                ...hostStatusMap.get(hostName),
+                checking: true
+            });
+            renderHosts();
+
+            try {
+                const { invoke } = window.__TAURI__.core;
+
+                // Create a timeout promise
+                const timeoutPromise = new Promise((_, reject) => {
+                    setTimeout(() => reject(new Error('Timeout')), STATUS_CHECK_TIMEOUT_MS);
+                });
+
+                // Race between actual check and timeout
+                const status = await Promise.race([
+                    invoke('get_quick_status', { serverName: hostName }),
+                    timeoutPromise
+                ]);
+
+                hostStatusMap.set(hostName, {
+                    status,
+                    timestamp: Date.now(),
+                    checking: false
+                });
+
+                return status;
+            } catch (err) {
+                logDebug(`checkHostStatus failed for ${hostName}: ${err}`);
+                hostStatusMap.set(hostName, {
+                    status: { ping_ok: false, winrm_ok: false, winrm_error: String(err) },
+                    timestamp: Date.now(),
+                    checking: false
+                });
+                return null;
+            } finally {
+                renderHosts();
+            }
+        }
+
+        async function checkAllHostsStatus() {
+            if (statusCheckInProgress) {
+                showBanner('info', 'Status check already in progress');
+                return;
+            }
+            if (!hosts.length) {
+                showBanner('info', 'No hosts to check');
+                return;
+            }
+            if (!window.__TAURI__?.core?.invoke) {
+                showBanner('error', 'Tauri API not available');
+                return;
+            }
+
+            statusCheckInProgress = true;
+            const btn = document.getElementById('check-status-all');
+            const textSpan = document.getElementById('check-status-text');
+            if (btn) btn.disabled = true;
+            if (textSpan) textSpan.textContent = 'Checking...';
+
+            const start = Date.now();
+            logDebug(`checkAllHostsStatus START for ${hosts.length} hosts`);
+
+            let completed = 0;
+            let online = 0;
+            let offline = 0;
+
+            // Check hosts in parallel with concurrency limit
+            const CONCURRENCY = 5;
+            const hostNames = hosts.map(h => h.name);
+
+            for (let i = 0; i < hostNames.length; i += CONCURRENCY) {
+                const batch = hostNames.slice(i, i + CONCURRENCY);
+                const results = await Promise.allSettled(
+                    batch.map(name => checkHostStatus(name, true))
+                );
+
+                results.forEach((result, idx) => {
+                    completed++;
+                    if (textSpan) {
+                        textSpan.textContent = `Checking (${completed}/${hostNames.length})`;
+                    }
+                    if (result.status === 'fulfilled' && result.value) {
+                        const status = result.value;
+                        if (status.winrm_ok || status.ping_ok) {
+                            online++;
+                        } else {
+                            offline++;
+                        }
+                    } else {
+                        offline++;
+                    }
+                });
+            }
+
+            const elapsed = Date.now() - start;
+            logDebug(`checkAllHostsStatus DONE in ${elapsed}ms: ${online} online, ${offline} offline`);
+
+            statusCheckInProgress = false;
+            if (btn) btn.disabled = false;
+            if (textSpan) textSpan.textContent = 'Refresh Status';
+
+            showBanner('success', `Status refreshed: ${online} online, ${offline} offline/unreachable`);
+            renderHosts();
+        }
+
+        // ========== End Host Status Checking Functions ==========
+
+        async function persistHosts(successMessage) {
+            const start = Date.now();
+            if (saveBusy) {
+                showBanner('error', 'Save already in progress');
+                return false;
+            }
+            if (!window.__TAURI__) {
+                showBanner('error', 'Tauri API not available');
+                return false;
+            }
+            saveBusy = true;
+
+            const hostNames = hosts.map(h => h.name).slice(0, 5).join(',');
+            logDebug(`hosts.html: persistHosts START ${hosts.length} [${hostNames}${hosts.length > 5 ? '...' : ''}]`);
+
+            try {
+                const payload = hosts.map(h => {
+                    const normalizedName = normalizeHostName(h.name);
+                    return {
+                        name: normalizedName,
+                        notes: h.notes || '',
+                        group: h.box || '',
+                        services: (h.services || []).filter(Boolean),
+                        os_type: normalizeOs(h.os || 'Windows')
+                    };
+                }).filter(h => h.name);
+                const { invoke } = window.__TAURI__.core;
+                await invoke('set_hosts', { hosts: payload });
+                hostsChanged = true;
+                markHostsChanged();
+
+                const elapsed = Date.now() - start;
+                logDebug(`hosts.html: persistHosts SUCCESS ${elapsed}ms`);
+
+                if (successMessage) {
+                    showBanner('success', successMessage);
+                }
+                return true;
+            } catch (err) {
+                const elapsed = Date.now() - start;
+                logDebug(`hosts.html: persistHosts FAILED ${elapsed}ms: ${err}`);
+                showBanner('error', `Failed to save hosts: ${err}`);
+                return false;
+            } finally {
+                saveBusy = false;
+            }
+        }
+    </script>
+</body>
+
+</html>

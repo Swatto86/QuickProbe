@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>About QuickProbe</title>
+    <!-- Apply theme before any render to prevent FOUC -->
+    <script>
+        (function () {
+            const root = document.documentElement;
+            root.classList.add('qp-preload');
+            const reveal = () => root.classList.remove('qp-preload');
+            window.__qpRevealSettings = reveal;
+            window.__qpPreloadTimer = setTimeout(reveal, 100);
+
+            // Apply theme immediately from localStorage (before ThemeModule loads)
+            try {
+                const settingsStr = localStorage.getItem('quickprobe_settings');
+                if (settingsStr) {
+                    const settings = JSON.parse(settingsStr);
+                    const themeSetting = settings.theme || 'system';
+
+                    // Simple inline resolution - ThemeModule will correct if needed
+                    let resolvedTheme = themeSetting;
+                    if (themeSetting === 'system') {
+                        resolvedTheme = window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+                    }
+
+                    root.setAttribute('data-theme', resolvedTheme);
+                } else {
+                    root.setAttribute('data-theme', 'dark');
+                }
+            } catch (e) {
+                console.warn('Failed to apply initial theme:', e);
+                root.setAttribute('data-theme', 'dark');
+            }
+        })();
+    </script>
+    <style>
+        .qp-preload body {
+            opacity: 0;
+            pointer-events: none;
+        }
+    </style>
+    <!-- Tailwind CSS + DaisyUI (locally built) -->
+    <link href="styles.css" rel="stylesheet">
+    <!-- Unified theme module for cross-window sync -->
+    <script src="theme.js"></script>
+</head>
+
+<body class="bg-base-100 min-h-screen flex items-center justify-center p-4">
+    <div class="card w-full max-w-3xl bg-base-100 shadow-2xl border border-base-300">
+        <div class="card-body p-5">
+            <!-- Header -->
+            <div class="text-center mb-4">
+                <h1 class="text-4xl font-bold text-primary mb-2">QuickProbe</h1>
+                <p class="text-lg font-semibold text-base-content/80">
+                    Version <span id="about-version" class="text-primary">2.0.0</span>
+                </p>
+            </div>
+
+            <div class="divider my-2"></div>
+
+            <!-- Description -->
+            <div class="prose prose-sm max-w-none text-center mb-4">
+                <p class="text-sm text-base-content/90 mb-2">
+                    Fast health probes over WinRM, credential-aware RDP launch, and clear per-host status at a glance.
+                </p>
+                <p class="text-sm text-base-content/80">
+                    Limited probe-only support is available for Linux hosts.
+                </p>
+            </div>
+
+            <!-- Author -->
+            <div class="text-center mb-4">
+                <h2 class="text-lg font-bold mb-1">Author</h2>
+                <p class="text-base font-bold text-primary">Swatto</p>
+            </div>
+
+            <!-- Key Capabilities -->
+            <div class="mb-4">
+                <h2 class="text-xl font-bold text-center mb-3">Key Capabilities</h2>
+                <ul class="space-y-2">
+                    <li class="flex items-start gap-2">
+                        <span class="text-success text-lg shrink-0">✓</span>
+                        <span class="text-sm text-base-content">Uses Windows Credential Manager for secure, native
+                            credential
+                            storage</span>
+                    </li>
+                    <li class="flex items-start gap-2">
+                        <span class="text-success text-lg shrink-0">✓</span>
+                        <span class="text-sm text-base-content">WinRM probes for core health signals (disk, services,
+                            system
+                            status)</span>
+                    </li>
+                    <li class="flex items-start gap-2">
+                        <span class="text-success text-lg shrink-0">✓</span>
+                        <span class="text-sm text-base-content">RDP launch with credential reuse and optional per-host
+                            overrides</span>
+                    </li>
+                    <li class="flex items-start gap-2">
+                        <span class="text-success text-lg shrink-0">✓</span>
+                        <span class="text-sm text-base-content">Hosts and settings stored locally</span>
+                    </li>
+                    <li class="flex items-start gap-2">
+                        <span class="text-success text-lg shrink-0">✓</span>
+                        <span class="text-sm text-base-content">No external telemetry by default</span>
+                    </li>
+                </ul>
+            </div>
+
+            <!-- Updates -->
+            <div class="mb-4">
+                <div class="flex flex-col items-center gap-2">
+                    <button id="check-updates-btn" class="btn btn-outline btn-sm gap-2">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24"
+                            stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                        </svg>
+                        <span class="btn-text">Check for Updates</span>
+                        <span class="loading loading-spinner loading-xs hidden"></span>
+                    </button>
+                    <span id="update-check-status" class="text-xs text-center"></span>
+                </div>
+            </div>
+
+            <!-- Actions -->
+            <div class="card-actions justify-center mt-4">
+                <button class="btn btn-primary btn-wide" type="button" id="about-close-btn">
+                    Close
+                </button>
+            </div>
+
+            <!-- Footer -->
+            <div class="text-center text-xs text-base-content/60 mt-4">
+                © 2025 QuickProbe. All rights reserved.
+            </div>
+        </div>
+    </div>
+
+    <!-- Update Required Modal (Blocking - no close button, no escape, no backdrop click) -->
+    <dialog id="update-modal" class="modal">
+        <div class="modal-box max-w-lg">
+            <div class="text-center mb-6">
+                <div class="mx-auto w-16 h-16 mb-4 text-warning">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                    </svg>
+                </div>
+                <h3 class="font-bold text-2xl text-warning">Update Required</h3>
+                <p class="text-base-content/70 mt-2">A new version of QuickProbe is available.</p>
+            </div>
+
+            <div class="flex justify-center items-center gap-4 mb-6">
+                <div class="text-center p-3 bg-base-200 rounded-lg min-w-24">
+                    <div class="text-xs uppercase tracking-wide text-base-content/50 mb-1">Current</div>
+                    <div id="update-modal-current" class="font-mono font-bold">v0.0.0</div>
+                </div>
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-base-content/50" fill="none"
+                    viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                </svg>
+                <div class="text-center p-3 bg-success/20 rounded-lg min-w-24 border border-success/30">
+                    <div class="text-xs uppercase tracking-wide text-success/70 mb-1">New</div>
+                    <div id="update-modal-new" class="font-mono font-bold text-success">v0.0.0</div>
+                </div>
+            </div>
+
+            <div class="collapse collapse-arrow bg-base-200 rounded-lg mb-6">
+                <input type="checkbox" checked />
+                <div class="collapse-title font-medium">What's New</div>
+                <div class="collapse-content">
+                    <pre id="update-modal-notes"
+                        class="text-sm whitespace-pre-wrap text-base-content/80 max-h-48 overflow-y-auto"></pre>
+                </div>
+            </div>
+
+            <div id="update-modal-error" class="alert alert-error mb-4 hidden">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24"
+                    stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <span id="update-modal-error-text"></span>
+            </div>
+
+            <div class="flex gap-3 justify-end">
+                <button type="button" id="update-modal-quit" class="btn btn-ghost">Quit</button>
+                <button type="button" id="update-modal-download" class="btn btn-primary gap-2">
+                    <span class="btn-text">Download Update</span>
+                    <span class="loading loading-spinner loading-sm hidden"></span>
+                </button>
+            </div>
+        </div>
+        <!-- No backdrop click handler - update is mandatory -->
+        <div class="modal-backdrop bg-black/70"></div>
+    </dialog>
+
+    <script>
+        // Tauri 2.x API - use core.invoke directly
+        const invoke = window.__TAURI__?.core?.invoke;
+        let updateCheckBusy = false;
+        let pendingUpdateInfo = null;
+
+        // Set up unified theme update listeners
+        window.addEventListener('DOMContentLoaded', async () => {
+            // Load theme from backend settings (or localStorage fallback)
+            let themeToApply = 'system';
+            try {
+                if (invoke) {
+                    const bundle = await invoke('settings_get_all');
+                    if (bundle?.qp_settings) {
+                        themeToApply = bundle.qp_settings.theme || 'system';
+                        // Sync to localStorage so all windows stay in sync
+                        localStorage.setItem('quickprobe_settings', JSON.stringify(bundle.qp_settings));
+                    }
+                } else {
+                    // Fallback to localStorage
+                    const settingsStr = localStorage.getItem('quickprobe_settings');
+                    if (settingsStr) {
+                        const settings = JSON.parse(settingsStr);
+                        themeToApply = settings.theme || 'system';
+                    }
+                }
+            } catch (err) {
+                console.warn('[About] Failed to load theme settings:', err);
+                // Fallback to localStorage
+                try {
+                    const settingsStr = localStorage.getItem('quickprobe_settings');
+                    if (settingsStr) {
+                        const settings = JSON.parse(settingsStr);
+                        themeToApply = settings.theme || 'system';
+                    }
+                } catch (e) {
+                    // Use default
+                }
+            }
+
+            if (window.ThemeModule?.subscribeToThemeUpdates) {
+                window.ThemeModule.subscribeToThemeUpdates(themeToApply);
+            }
+
+            // Wire up update check button
+            wireUpdateEvents();
+        });
+
+        document.getElementById('about-close-btn')?.addEventListener('click', async () => {
+            // Tauri 2.x: use webviewWindow.getCurrentWebviewWindow().close()
+            if (window.__TAURI__?.webviewWindow?.getCurrentWebviewWindow) {
+                const currentWindow = window.__TAURI__.webviewWindow.getCurrentWebviewWindow();
+                await currentWindow.close();
+            }
+        });
+        if (invoke) {
+            invoke('get_version').then(v => {
+                const el = document.getElementById('about-version');
+                if (el) el.textContent = v;
+            }).catch(() => { });
+        }
+
+        // ========== Update Check Functions ==========
+        function showUpdateCheckStatus(message, isError = false, isSuccess = false) {
+            const statusEl = document.getElementById('update-check-status');
+            if (!statusEl) return;
+            statusEl.textContent = message;
+            if (isError) {
+                statusEl.className = 'text-xs text-center text-error';
+            } else if (isSuccess) {
+                statusEl.className = 'text-xs text-center text-success';
+            } else {
+                statusEl.className = 'text-xs text-center text-base-content/60';
+            }
+        }
+
+        function setUpdateCheckLoading(loading) {
+            const btn = document.getElementById('check-updates-btn');
+            const textEl = btn?.querySelector('.btn-text');
+            const spinnerEl = btn?.querySelector('.loading');
+
+            if (loading) {
+                if (btn) btn.disabled = true;
+                if (textEl) textEl.textContent = 'Checking...';
+                if (spinnerEl) spinnerEl.classList.remove('hidden');
+            } else {
+                if (btn) btn.disabled = false;
+                if (textEl) textEl.textContent = 'Check for Updates';
+                if (spinnerEl) spinnerEl.classList.add('hidden');
+            }
+        }
+
+        function showUpdateModal(updateInfo) {
+            pendingUpdateInfo = updateInfo;
+            const modal = document.getElementById('update-modal');
+            const currentEl = document.getElementById('update-modal-current');
+            const newEl = document.getElementById('update-modal-new');
+            const notesEl = document.getElementById('update-modal-notes');
+            const errorEl = document.getElementById('update-modal-error');
+
+            if (!modal) return;
+
+            // Populate modal
+            if (currentEl) currentEl.textContent = `v${updateInfo.current_version}`;
+            if (newEl) newEl.textContent = `v${updateInfo.version}`;
+            if (notesEl) {
+                // Clean up markdown
+                let notes = updateInfo.body || 'No release notes available.';
+                notes = notes
+                    .replace(/^#+\s*/gm, '')
+                    .replace(/\*\*(.*?)\*\*/g, '$1')
+                    .replace(/__(.*?)__/g, '$1')
+                    .replace(/\*(.*?)\*/g, '$1')
+                    .replace(/_(.*?)_/g, '$1')
+                    .trim();
+                notesEl.textContent = notes;
+            }
+
+            // Hide any previous error
+            if (errorEl) errorEl.classList.add('hidden');
+
+            // Reset download button
+            setUpdateDownloadLoading(false);
+
+            // Show modal - prevent escape key from closing
+            modal.showModal();
+
+            // Prevent escape key
+            modal.addEventListener('cancel', preventModalClose);
+            modal.addEventListener('keydown', handleUpdateModalKeydown);
+        }
+
+        function preventModalClose(e) {
+            e.preventDefault();
+        }
+
+        function handleUpdateModalKeydown(e) {
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+        }
+
+        function hideUpdateModal() {
+            const modal = document.getElementById('update-modal');
+            if (!modal) return;
+            modal.removeEventListener('cancel', preventModalClose);
+            modal.removeEventListener('keydown', handleUpdateModalKeydown);
+            modal.close();
+            pendingUpdateInfo = null;
+        }
+
+        function showUpdateModalError(message) {
+            const errorEl = document.getElementById('update-modal-error');
+            const textEl = document.getElementById('update-modal-error-text');
+            if (errorEl && textEl) {
+                textEl.textContent = message;
+                errorEl.classList.remove('hidden');
+            }
+        }
+
+        function setUpdateDownloadLoading(loading) {
+            const btn = document.getElementById('update-modal-download');
+            const textEl = btn?.querySelector('.btn-text');
+            const spinnerEl = btn?.querySelector('.loading');
+            const quitBtn = document.getElementById('update-modal-quit');
+
+            if (loading) {
+                if (btn) btn.disabled = true;
+                if (quitBtn) quitBtn.disabled = true;
+                if (textEl) textEl.textContent = 'Downloading...';
+                if (spinnerEl) spinnerEl.classList.remove('hidden');
+            } else {
+                if (btn) btn.disabled = false;
+                if (quitBtn) quitBtn.disabled = false;
+                if (textEl) textEl.textContent = 'Download Update';
+                if (spinnerEl) spinnerEl.classList.add('hidden');
+            }
+        }
+
+        async function checkForUpdates() {
+            if (updateCheckBusy) return;
+            if (!invoke) {
+                showUpdateCheckStatus('Tauri API not available', true);
+                return;
+            }
+
+            updateCheckBusy = true;
+            setUpdateCheckLoading(true);
+            showUpdateCheckStatus('');
+
+            try {
+                const updateInfo = await invoke('check_for_update');
+
+                if (updateInfo.available) {
+                    // Update is available - show blocking modal
+                    showUpdateModal(updateInfo);
+                } else {
+                    // No update available
+                    showUpdateCheckStatus('You are running the latest version.', false, true);
+                }
+            } catch (error) {
+                console.error('Update check failed:', error);
+                showUpdateCheckStatus(`Failed to check: ${error}`, true);
+            } finally {
+                updateCheckBusy = false;
+                setUpdateCheckLoading(false);
+            }
+        }
+
+        async function handleUpdateDownload() {
+            if (!pendingUpdateInfo || !invoke) return;
+
+            setUpdateDownloadLoading(true);
+
+            try {
+                await invoke('download_and_install_update', { updateInfo: pendingUpdateInfo });
+
+                // Give installer time to start, then exit
+                setTimeout(async () => {
+                    try {
+                        if (window.__TAURI__?.process?.exit) {
+                            await window.__TAURI__.process.exit(0);
+                        } else {
+                            window.close();
+                        }
+                    } catch {
+                        window.close();
+                    }
+                }, 1000);
+            } catch (error) {
+                console.error('Download failed:', error);
+                setUpdateDownloadLoading(false);
+                showUpdateModalError(`Download failed: ${error}`);
+            }
+        }
+
+        async function handleUpdateQuit() {
+            try {
+                if (window.__TAURI__?.process?.exit) {
+                    await window.__TAURI__.process.exit(0);
+                } else {
+                    window.close();
+                }
+            } catch {
+                window.close();
+            }
+        }
+
+        function wireUpdateEvents() {
+            const checkBtn = document.getElementById('check-updates-btn');
+            if (checkBtn) {
+                checkBtn.addEventListener('click', checkForUpdates);
+            }
+
+            const downloadBtn = document.getElementById('update-modal-download');
+            if (downloadBtn) {
+                downloadBtn.addEventListener('click', handleUpdateDownload);
+            }
+
+            const quitBtn = document.getElementById('update-modal-quit');
+            if (quitBtn) {
+                quitBtn.addEventListener('click', handleUpdateQuit);
+            }
+        }
+        // ========== End Update Check Functions ==========
+    </script>
+</body>
+
+</html>

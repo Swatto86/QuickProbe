@@ -1,0 +1,145 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    outputs:
+      release_id: ${{ steps.create-release.outputs.result }}
+      release_body: ${{ steps.get-notes.outputs.notes }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch tags with annotations
+        run: |
+          # Ensure we have all tag data including annotations
+          git fetch --tags --force
+
+      - name: Get release notes from tag
+        id: get-notes
+        run: |
+          TAG_NAME=${GITHUB_REF#refs/tags/}
+          echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
+          
+          echo "Extracting release notes for tag: $TAG_NAME"
+          
+          # Use git for-each-ref to get the FULL tag annotation (body/contents)
+          # This is more reliable than git tag -n which can truncate
+          NOTES=$(git for-each-ref --format='%(contents)' "refs/tags/$TAG_NAME" 2>/dev/null || echo "")
+          
+          # Debug output
+          echo "Raw notes extracted:"
+          echo "$NOTES"
+          echo "---"
+          
+          # If empty, try fallback method
+          if [ -z "$(echo "$NOTES" | tr -d '[:space:]')" ]; then
+            echo "Trying fallback method..."
+            RAW_NOTES=$(git tag -l -n1000 "$TAG_NAME" 2>/dev/null || echo "")
+            if [ -n "$RAW_NOTES" ]; then
+              NOTES=$(echo "$RAW_NOTES" | sed "s/^${TAG_NAME}[[:space:]]*//")
+            fi
+          fi
+
+          # If still empty, use default message
+          if [ -z "$(echo "$NOTES" | tr -d '[:space:]')" ]; then
+            echo "No notes found, using default message"
+            NOTES=$(printf "Release %s\n\nSee the assets below to download and install this version." "$TAG_NAME")
+          fi
+
+          echo "Final release notes:"
+          echo "$NOTES"
+
+          # Escape for GitHub Actions output (handle multi-line)
+          {
+            echo 'notes<<EOF'
+            echo "$NOTES"
+            echo 'EOF'
+          } >> $GITHUB_OUTPUT
+
+      - name: Create draft release
+        id: create-release
+        uses: actions/github-script@v7
+        env:
+          TAG_NAME: ${{ steps.get-notes.outputs.tag_name }}
+          RELEASE_NOTES: ${{ steps.get-notes.outputs.notes }}
+        with:
+          script: |
+            const { TAG_NAME, RELEASE_NOTES } = process.env;
+            
+            const release = await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: TAG_NAME,
+              name: `QuickProbe ${TAG_NAME}`,
+              body: RELEASE_NOTES,
+              draft: true,
+              prerelease: false
+            });
+            
+            return release.data.id;
+
+  build-windows:
+    needs: create-release
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Tauri App
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          releaseId: ${{ needs.create-release.outputs.release_id }}
+          includeUpdaterJson: true
+          updaterJsonKeepUniversal: true
+
+  publish-release:
+    needs: [create-release, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish release
+        uses: actions/github-script@v7
+        env:
+          RELEASE_ID: ${{ needs.create-release.outputs.release_id }}
+        with:
+          script: |
+            await github.rest.repos.updateRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: process.env.RELEASE_ID,
+              draft: false
+            });
+            console.log(`Published release ${process.env.RELEASE_ID}`);

@@ -1,0 +1,76 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "QuickProbe",
+  "version": "2.0.0",
+  "identifier": "com.swatto.quickprobe",
+  "build": {
+    "beforeDevCommand": "",
+    "beforeBuildCommand": "",
+    "frontendDist": "../ui"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "security": {
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;"
+    },
+    "windows": [
+      {
+        "label": "main",
+        "fullscreen": false,
+        "resizable": true,
+        "title": "QuickProbe",
+        "width": 1200,
+        "height": 800,
+        "minWidth": 800,
+        "minHeight": 600,
+        "visible": false,
+        "decorations": true,
+        "transparent": false,
+        "url": "login.html"
+      },
+      {
+        "label": "update-required",
+        "fullscreen": false,
+        "resizable": false,
+        "title": "QuickProbe - Update Required",
+        "width": 500,
+        "height": 700,
+        "visible": false,
+        "decorations": true,
+        "transparent": false,
+        "center": true,
+        "url": "update-required.html"
+      }
+    ]
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "nsis"
+    ],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.png",
+      "icons/icon.ico"
+    ],
+    "publisher": "Swatto",
+    "shortDescription": "QuickProbe - Windows server interrogation tool",
+    "longDescription": "QuickProbe monitors Windows servers for health, disk, services, and enables quick RDP launch with stored credentials.",
+    "copyright": "© 2025 Swatto",
+    "resources": [],
+    "windows": {
+      "digestAlgorithm": "sha256",
+      "nsis": {
+        "displayLanguageSelector": false,
+        "installerIcon": "icons/icon.ico"
+      }
+    }
+  },
+  "plugins": {
+    "shell": {
+      "open": true
+    }
+  }
+}

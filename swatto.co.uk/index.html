@@ -1,0 +1,760 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>QuickProbe - Server Health Monitoring for Windows & Linux</title>
+    <meta name="description"
+        content="QuickProbe is a free, open-source desktop application for system administrators to monitor Windows and Linux servers. Real-time health probes via WinRM and SSH, one-click RDP launch, and secure credential management." />
+    <meta name="keywords"
+        content="QuickProbe, server monitoring, Windows Server, Linux, WinRM, SSH, RDP launcher, sysadmin tool, open source, Tauri, Rust" />
+    <meta name="author" content="Swatto" />
+    <meta name="robots" content="index, follow" />
+    <link rel="canonical" href="https://swatto.co.uk/" />
+
+    <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png" />
+    <link rel="apple-touch-icon" href="icon.png" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://swatto.co.uk/" />
+    <meta property="og:title" content="QuickProbe - Server Health Monitoring for Windows & Linux" />
+    <meta property="og:description"
+        content="Free, open-source server monitoring tool for system administrators. Real-time health probes, one-click RDP, Active Directory scanning." />
+    <meta property="og:image" content="https://swatto.co.uk/icon.png" />
+    <meta property="og:site_name" content="QuickProbe" />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:url" content="https://swatto.co.uk/" />
+    <meta name="twitter:title" content="QuickProbe - Server Health Monitoring for Windows & Linux" />
+    <meta name="twitter:description"
+        content="Free, open-source server monitoring tool for sysadmins. Real-time health probes via WinRM and SSH." />
+    <meta name="twitter:image" content="https://swatto.co.uk/icon.png" />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+    <style>
+        :root {
+            --bg: #0a0a0a;
+            --panel: #141414;
+            --panel-soft: #1a1a1a;
+            --text: #fafafa;
+            --muted: #a1a1aa;
+            --border: #27272a;
+            --accent: #22c55e;
+            --accent-hover: #16a34a;
+            --accent-soft: rgba(34, 197, 94, 0.15);
+            --warning: #eab308;
+            --error: #ef4444;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            line-height: 1.6;
+            color: var(--text);
+            background: var(--bg);
+        }
+
+        a {
+            color: var(--accent);
+            text-decoration: none;
+        }
+
+        a:hover {
+            text-decoration: underline;
+        }
+
+        code {
+            background: var(--panel-soft);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.9em;
+            font-family: "JetBrains Mono", "Fira Code", monospace;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 0 24px;
+        }
+
+        /* Hero */
+        .hero {
+            padding: 80px 0 60px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .hero-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: var(--accent-soft);
+            color: var(--accent);
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: 500;
+            margin-bottom: 20px;
+        }
+
+        .hero h1 {
+            font-size: 3rem;
+            font-weight: 700;
+            letter-spacing: -0.03em;
+            margin-bottom: 16px;
+        }
+
+        .hero-subtitle {
+            font-size: 1.25rem;
+            color: var(--muted);
+            max-width: 640px;
+            margin-bottom: 32px;
+        }
+
+        .hero-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin-bottom: 40px;
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 12px 24px;
+            font-weight: 600;
+            font-size: 0.95rem;
+            border-radius: 8px;
+            border: none;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            text-decoration: none;
+        }
+
+        .btn-primary {
+            background: var(--accent);
+            color: #000;
+        }
+
+        .btn-primary:hover {
+            background: var(--accent-hover);
+            text-decoration: none;
+        }
+
+        .btn-secondary {
+            background: var(--panel);
+            color: var(--text);
+            border: 1px solid var(--border);
+        }
+
+        .btn-secondary:hover {
+            background: var(--panel-soft);
+            border-color: var(--muted);
+            text-decoration: none;
+        }
+
+        .hero-stats {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 32px;
+        }
+
+        .stat {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .stat-value {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--text);
+        }
+
+        .stat-label {
+            font-size: 0.85rem;
+            color: var(--muted);
+        }
+
+        /* Section */
+        section {
+            padding: 60px 0;
+            border-bottom: 1px solid var(--border);
+        }
+
+        section:last-of-type {
+            border-bottom: none;
+        }
+
+        .section-title {
+            font-size: 1.75rem;
+            font-weight: 700;
+            margin-bottom: 8px;
+            letter-spacing: -0.02em;
+        }
+
+        .section-desc {
+            color: var(--muted);
+            margin-bottom: 32px;
+            max-width: 640px;
+        }
+
+        /* Cards Grid */
+        .cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 16px;
+        }
+
+        .card {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 24px;
+        }
+
+        .card-icon {
+            width: 40px;
+            height: 40px;
+            background: var(--accent-soft);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 16px;
+            font-size: 1.25rem;
+        }
+
+        .card h3 {
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .card p {
+            color: var(--muted);
+            font-size: 0.95rem;
+        }
+
+        /* Quick Start */
+        .quickstart {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            overflow: hidden;
+        }
+
+        .quickstart-header {
+            padding: 16px 24px;
+            border-bottom: 1px solid var(--border);
+            font-weight: 600;
+        }
+
+        .quickstart-steps {
+            padding: 24px;
+        }
+
+        .step {
+            display: flex;
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        .step:last-child {
+            margin-bottom: 0;
+        }
+
+        .step-number {
+            width: 28px;
+            height: 28px;
+            background: var(--accent);
+            color: #000;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 0.85rem;
+            flex-shrink: 0;
+        }
+
+        .step-content h4 {
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+
+        .step-content p {
+            color: var(--muted);
+            font-size: 0.95rem;
+        }
+
+        /* Table */
+        .table-wrap {
+            overflow-x: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th,
+        td {
+            padding: 12px 16px;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+        }
+
+        th {
+            font-weight: 600;
+            color: var(--muted);
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        td {
+            font-size: 0.95rem;
+        }
+
+        /* Requirements */
+        .requirements {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 24px;
+        }
+
+        .req-group h4 {
+            font-weight: 600;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .req-group ul {
+            list-style: none;
+            padding: 0;
+        }
+
+        .req-group li {
+            padding: 8px 0;
+            color: var(--muted);
+            border-bottom: 1px solid var(--border);
+            font-size: 0.95rem;
+        }
+
+        .req-group li:last-child {
+            border-bottom: none;
+        }
+
+        /* Footer */
+        footer {
+            padding: 40px 0;
+            text-align: center;
+            color: var(--muted);
+            font-size: 0.9rem;
+        }
+
+        footer a {
+            color: var(--muted);
+        }
+
+        footer a:hover {
+            color: var(--text);
+        }
+
+        /* Responsive */
+        @media (max-width: 640px) {
+            .hero h1 {
+                font-size: 2.25rem;
+            }
+
+            .hero-stats {
+                gap: 24px;
+            }
+
+            .hero-actions {
+                flex-direction: column;
+            }
+
+            .btn {
+                width: 100%;
+                justify-content: center;
+            }
+        }
+    </style>
+
+    <script type="application/ld+json">
+        {
+            "@context": "https://schema.org",
+            "@type": "SoftwareApplication",
+            "name": "QuickProbe",
+            "applicationCategory": "SystemAdministrationApplication",
+            "operatingSystem": "Windows 10, Windows 11, Windows Server 2012 R2+",
+            "description": "A free, open-source desktop application for system administrators to monitor Windows and Linux server health via WinRM and SSH, with one-click RDP launch and secure credential management.",
+            "url": "https://swatto.co.uk/",
+            "downloadUrl": "https://github.com/Swatto86/QuickProbe/releases",
+            "author": {
+                "@type": "Person",
+                "name": "Swatto"
+            },
+            "softwareVersion": "2.0.0",
+            "license": "MIT",
+            "isAccessibleForFree": true,
+            "offers": {
+                "@type": "Offer",
+                "price": "0"
+            }
+        }
+    </script>
+</head>
+
+<body>
+    <main>
+        <section class="hero">
+            <div class="container">
+                <div class="hero-badge">
+                    <span>🟢</span> Open Source • MIT License
+                </div>
+                <h1>QuickProbe</h1>
+                <p class="hero-subtitle">
+                    A lightweight desktop app for system administrators to monitor Windows and Linux servers.
+                    Check server health, launch RDP sessions, and manage your fleet—all from one place.
+                </p>
+                <div class="hero-actions">
+                    <a href="https://github.com/Swatto86/QuickProbe/releases" class="btn btn-primary">
+                        ⬇️ Download for Windows
+                    </a>
+                    <a href="https://github.com/Swatto86/QuickProbe" class="btn btn-secondary">
+                        View on GitHub
+                    </a>
+                </div>
+                <div class="hero-stats">
+                    <div class="stat">
+                        <span class="stat-value">WinRM + SSH</span>
+                        <span class="stat-label">Probe protocols</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-value">Windows & Linux</span>
+                        <span class="stat-label">Target platforms</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-value">Local-first</span>
+                        <span class="stat-label">No cloud required</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section id="what">
+            <div class="container">
+                <h2 class="section-title">What is QuickProbe?</h2>
+                <p class="section-desc">
+                    QuickProbe is a Windows desktop application built for IT administrators who need to quickly check
+                    server health
+                    and connect to remote machines. It uses WinRM (PowerShell Remoting) for Windows servers and SSH for
+                    Linux hosts.
+                </p>
+                <div class="cards">
+                    <div class="card">
+                        <div class="card-icon">🖥️</div>
+                        <h3>Real-time Health Probes</h3>
+                        <p>
+                            Get CPU, memory, disk, uptime, and service status from your servers in seconds.
+                            Automatic heartbeat checks keep your dashboard fresh.
+                        </p>
+                    </div>
+                    <div class="card">
+                        <div class="card-icon">🚀</div>
+                        <h3>One-click RDP Launch</h3>
+                        <p>
+                            Double-click any server card to launch an RDP session with your stored credentials.
+                            No more typing passwords repeatedly.
+                        </p>
+                    </div>
+                    <div class="card">
+                        <div class="card-icon">🔐</div>
+                        <h3>Secure Credentials</h3>
+                        <p>
+                            Credentials are stored in Windows Credential Manager (DPAPI encrypted).
+                            Nothing is stored in plaintext—ever.
+                        </p>
+                    </div>
+                    <div class="card">
+                        <div class="card-icon">📂</div>
+                        <h3>Active Directory Scanning</h3>
+                        <p>
+                            Scan your domain via LDAP to automatically discover servers.
+                            Bulk import with smart merging preserves your existing notes and groups.
+                        </p>
+                    </div>
+                    <div class="card">
+                        <div class="card-icon">💾</div>
+                        <h3>Local SQLite Storage</h3>
+                        <p>
+                            All data stays on your machine in a SQLite database. No cloud services,
+                            no internet required, no subscription fees.
+                        </p>
+                    </div>
+                    <div class="card">
+                        <div class="card-icon">🔄</div>
+                        <h3>Backup & Restore</h3>
+                        <p>
+                            Export your configuration as an AES-256 encrypted ZIP file.
+                            Migrate to a new machine or share with your team securely.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section id="health">
+            <div class="container">
+                <h2 class="section-title">What does QuickProbe collect?</h2>
+                <p class="section-desc">
+                    QuickProbe runs remote commands via WinRM (Windows) or SSH (Linux) to gather system health data.
+                    Here's what you'll see on your dashboard:
+                </p>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Metric</th>
+                                <th>Windows (WinRM)</th>
+                                <th>Linux (SSH)</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><strong>OS Info</strong></td>
+                                <td>Version, hostname, domain</td>
+                                <td>Distro, kernel, hostname</td>
+                            </tr>
+                            <tr>
+                                <td><strong>CPU</strong></td>
+                                <td>Load % (normalized by cores)</td>
+                                <td>Load average</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Memory</strong></td>
+                                <td>Total / Used / Free</td>
+                                <td>Total / Used / Free</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Disk</strong></td>
+                                <td>All volumes with % free</td>
+                                <td>All mounts via <code>df</code></td>
+                            </tr>
+                            <tr>
+                                <td><strong>Uptime</strong></td>
+                                <td>Hours since last boot</td>
+                                <td>Hours since last boot</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Services</strong></td>
+                                <td>Status of specified services</td>
+                                <td>Status via <code>systemctl</code></td>
+                            </tr>
+                            <tr>
+                                <td><strong>Processes</strong></td>
+                                <td>Top CPU consumers</td>
+                                <td>Top CPU consumers via <code>ps</code></td>
+                            </tr>
+                            <tr>
+                                <td><strong>Pending Reboot</strong></td>
+                                <td>Windows Update, CBS, file renames</td>
+                                <td>—</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Network</strong></td>
+                                <td>Adapters, IPs, firewall status</td>
+                                <td>—</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Event Logs</strong></td>
+                                <td>Recent errors from System/App logs</td>
+                                <td>—</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <section id="quickstart">
+            <div class="container">
+                <h2 class="section-title">Quick Start</h2>
+                <p class="section-desc">
+                    Get up and running in under 5 minutes.
+                </p>
+                <div class="quickstart">
+                    <div class="quickstart-header">Getting Started</div>
+                    <div class="quickstart-steps">
+                        <div class="step">
+                            <div class="step-number">1</div>
+                            <div class="step-content">
+                                <h4>Download and install</h4>
+                                <p>
+                                    Download the installer from GitHub Releases. Run it—no admin rights needed.
+                                    QuickProbe installs to your user profile.
+                                </p>
+                            </div>
+                        </div>
+                        <div class="step">
+                            <div class="step-number">2</div>
+                            <div class="step-content">
+                                <h4>Enter your credentials</h4>
+                                <p>
+                                    On first launch, enter your domain credentials (e.g., <code>DOMAIN\username</code>).
+                                    These are stored securely in Windows Credential Manager.
+                                </p>
+                            </div>
+                        </div>
+                        <div class="step">
+                            <div class="step-number">3</div>
+                            <div class="step-content">
+                                <h4>Add your servers</h4>
+                                <p>
+                                    Add servers manually, or scan your Active Directory domain to import them
+                                    automatically.
+                                    Set the OS type (Windows/Linux) for each host.
+                                </p>
+                            </div>
+                        </div>
+                        <div class="step">
+                            <div class="step-number">4</div>
+                            <div class="step-content">
+                                <h4>Monitor and connect</h4>
+                                <p>
+                                    Click "Refresh" to probe your servers. Double-click any card to launch RDP.
+                                    Use the dashboard filters to find servers with issues quickly.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section id="requirements">
+            <div class="container">
+                <h2 class="section-title">Requirements</h2>
+                <p class="section-desc">
+                    What you need to run QuickProbe and probe your servers.
+                </p>
+                <div class="requirements">
+                    <div class="req-group">
+                        <h4>🖥️ Your Workstation</h4>
+                        <ul>
+                            <li>Windows 10/11 or Windows Server 2012 R2+</li>
+                            <li>PowerShell 5.1+ (included in Windows)</li>
+                            <li>Network access to target servers</li>
+                        </ul>
+                    </div>
+                    <div class="req-group">
+                        <h4>🪟 Windows Targets</h4>
+                        <ul>
+                            <li>WinRM enabled (<code>Enable-PSRemoting -Force</code>)</li>
+                            <li>Port 5985 (HTTP) or 5986 (HTTPS) open</li>
+                            <li>Admin credentials with remote access</li>
+                        </ul>
+                    </div>
+                    <div class="req-group">
+                        <h4>🐧 Linux Targets</h4>
+                        <ul>
+                            <li>SSH server running on port 22</li>
+                            <li>Standard utilities: <code>df</code>, <code>ps</code>, <code>systemctl</code></li>
+                            <li>User account with sudo access for full metrics</li>
+                        </ul>
+                    </div>
+                    <div class="req-group">
+                        <h4>🔐 Credentials</h4>
+                        <ul>
+                            <li>Domain account for Windows servers</li>
+                            <li>SSH credentials for Linux hosts</li>
+                            <li>Per-host overrides supported</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section id="tech">
+            <div class="container">
+                <h2 class="section-title">Built With</h2>
+                <p class="section-desc">
+                    QuickProbe is built with modern, reliable technologies.
+                </p>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Component</th>
+                                <th>Technology</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><strong>Backend</strong></td>
+                                <td>Rust + Tauri 2.x</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Frontend</strong></td>
+                                <td>HTML/CSS/JavaScript + Tailwind CSS + DaisyUI</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Database</strong></td>
+                                <td>SQLite with WAL mode</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Windows Probes</strong></td>
+                                <td>WinRM via PowerShell Remoting</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Linux Probes</strong></td>
+                                <td>SSH via ssh2 crate</td>
+                            </tr>
+                            <tr>
+                                <td><strong>AD Scanning</strong></td>
+                                <td>LDAP via ldap3 crate</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Credentials</strong></td>
+                                <td>Windows Credential Manager (DPAPI)</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Backups</strong></td>
+                                <td>AES-256 encrypted ZIP files</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <div class="container">
+            <p>
+                <strong>QuickProbe</strong> is open source under the MIT License.
+                <br />
+                <a href="https://github.com/Swatto86/QuickProbe">GitHub</a> •
+                <a href="https://github.com/Swatto86/QuickProbe/issues">Report an Issue</a> •
+                Made by <a href="https://github.com/Swatto86">Swatto</a>
+            </p>
+        </div>
+    </footer>
+</body>
+
+</html>
