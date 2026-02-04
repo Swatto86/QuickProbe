@@ -2740,7 +2740,9 @@ async fn connect_remote_session(
     .await;
 
     match &result {
-        Ok(_) => logger::log_debug_verbose(&format!("connect_remote_session: OK '{}'", server_name)),
+        Ok(_) => {
+            logger::log_debug_verbose(&format!("connect_remote_session: OK '{}'", server_name))
+        }
         Err(e) => logger::log_error(&format!(
             "connect_remote_session: FAILED '{}': {}",
             server_name, e
