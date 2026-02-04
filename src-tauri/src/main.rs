@@ -6090,6 +6090,11 @@ fn main() {
     }
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            // When a second instance is launched, focus the existing main window
+            logger::log_info("Second instance detected, focusing existing window");
+            let _ = show_and_focus_main(app);
+        }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_process::init())
