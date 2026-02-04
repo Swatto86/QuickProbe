@@ -1,0 +1,506 @@
+/* ===========================================================================
+   Dashboard Minimal Functional CSS
+   ===========================================================================
+
+   This file contains ONLY functional/behavioral CSS that cannot be achieved
+   with DaisyUI/Tailwind utility classes. All visual styling uses DaisyUI.
+
+   Contents:
+   - Animations (slideIn, cardRefreshPulse, pillPop, fadeIn)
+   - Behavioral classes (expanded-card, card-details display toggle)
+   - Custom grid layouts with specific sizing requirements
+   - Search highlighting
+   - Remote PowerShell modal styles
+
+   =========================================================================== */
+
+/* ===== Remote PowerShell Modal ===== */
+
+.remote-powershell-output {
+    min-height: 200px;
+}
+
+.remote-powershell-input {
+    padding-left: 2.4rem !important;
+}
+
+/* Script preview with line numbers hint */
+#remote-powershell-script-content {
+    counter-reset: line;
+    tab-size: 4;
+}
+
+/* ===== Animations ===== */
+
+@keyframes slideIn {
+    from {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+@keyframes cardRefreshPulse {
+    0%, 100% {
+        transform: scale(1);
+    }
+    50% {
+        transform: scale(1.015);
+    }
+}
+
+@keyframes refreshGlow {
+    0%, 100% {
+        border-color: rgba(59, 130, 246, 0.6);
+        box-shadow:
+            0 0 10px rgba(59, 130, 246, 0.5),
+            0 0 20px rgba(59, 130, 246, 0.3),
+            0 4px 12px rgba(0, 0, 0, 0.2);
+    }
+    50% {
+        border-color: rgba(59, 130, 246, 1);
+        box-shadow:
+            0 0 20px rgba(59, 130, 246, 0.8),
+            0 0 40px rgba(59, 130, 246, 0.5),
+            0 6px 18px rgba(0, 0, 0, 0.25);
+    }
+}
+
+@keyframes glowRing {
+    0%, 100% {
+        opacity: 0.5;
+        border-color: rgba(59, 130, 246, 0.5);
+    }
+    50% {
+        opacity: 0.9;
+        border-color: rgba(59, 130, 246, 0.8);
+    }
+}
+
+@keyframes pillPop {
+    0% {
+        transform: scale(1);
+    }
+    50% {
+        transform: scale(1.06);
+    }
+    100% {
+        transform: scale(1);
+    }
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(-4px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* ===== Animation Application ===== */
+
+.notification {
+    animation: slideIn 0.3s ease-out;
+}
+
+.server-card.refreshing {
+    animation:
+        cardRefreshPulse 1.5s ease-in-out infinite,
+        refreshGlow 1.5s ease-in-out infinite !important;
+    border: 2px solid rgba(59, 130, 246, 0.7) !important;
+    position: relative !important;
+    z-index: 10 !important;
+    background: linear-gradient(135deg, rgba(59, 130, 246, 0.1), rgba(59, 130, 246, 0.05)) !important;
+}
+
+/* Glowing ring effect using pseudo-element */
+.server-card.refreshing::before {
+    content: '';
+    position: absolute;
+    inset: -6px;
+    border: 2px solid rgba(59, 130, 246, 0.6);
+    border-radius: inherit;
+    pointer-events: none;
+    animation: glowRing 1.5s ease-in-out infinite;
+    z-index: -1;
+}
+
+.group-pill.click-animate {
+    animation: pillPop 260ms ease;
+}
+
+.group-card.expanded .group-card-hosts {
+    animation: fadeIn 200ms ease;
+}
+
+/* ===== Behavioral CSS (Display Toggling) ===== */
+
+/* Card details always visible (no longer toggleable) */
+
+/* Group card hosts hidden by default */
+.group-card-hosts {
+    display: none;
+}
+
+.group-card.expanded .group-card-hosts {
+    display: block;
+}
+
+.group-card-hosts.grid-mode {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    gap: 0.75rem;
+    align-items: start;
+}
+
+/* Empty state hidden state */
+.empty-state.hidden {
+    display: none;
+}
+
+/* ===== Custom Grid Layouts (Specific Sizing Requirements) ===== */
+
+/* Server card grid - 360px minimum width for proper card display */
+.servers-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+    gap: 1.25rem;
+    align-items: start;
+}
+
+/* Summary stats grid */
+.summary-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1rem;
+    margin-bottom: 2rem;
+}
+
+/* Group view grid */
+.group-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 1rem;
+    margin-top: 0.5rem;
+    align-items: start;
+}
+
+.group-grid.group-focus-active {
+    display: block;
+}
+
+.group-card.full-focus {
+    grid-column: 1 / -1;
+}
+
+/* ===== Search Highlighting (Functional) ===== */
+
+.highlight {
+    background: hsl(var(--p) / 0.15);
+    color: hsl(var(--p));
+    border-radius: 4px;
+    padding: 0 2px;
+}
+
+/* ===== Active State for Stats (Functional) ===== */
+
+.stat-card-active {
+    border-color: hsl(var(--p)) !important;
+    box-shadow: 0 6px 20px hsl(var(--p) / 0.4) !important;
+}
+
+/* ===== Server Card Behavioral Classes ===== */
+
+/* Server name bold for better visibility */
+.server-name {
+    font-weight: bold;
+}
+
+/* Card action buttons container */
+.server-card .qp-card-actions {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 0.25rem !important;
+    padding: 0.5rem !important;
+    margin-top: 0.75rem !important;
+    border: 3px solid oklch(var(--bc)) !important;
+    border-radius: 0.5rem !important;
+    background-color: oklch(var(--b2)) !important;
+}
+
+/* Row within card actions */
+.server-card .qp-card-actions-row {
+    display: flex !important;
+    justify-content: center !important;
+    gap: 0.25rem !important;
+}
+
+.server-card .qp-card-actions button {
+    flex-shrink: 0 !important;
+    white-space: nowrap !important;
+    padding: 0.5rem 0.875rem !important;
+    font-size: 0.875rem !important;
+    font-weight: 600 !important;
+    border: 2px solid hsl(var(--bc) / 0.35) !important;
+    border-radius: 0.375rem !important;
+    background: hsl(var(--b1)) !important;
+    color: hsl(var(--bc)) !important;
+    cursor: pointer !important;
+    transition: all 0.15s ease !important;
+}
+
+.server-card .qp-card-actions button:hover {
+    background: hsl(var(--p) / 0.15) !important;
+    border-color: hsl(var(--p)) !important;
+    color: hsl(var(--p)) !important;
+    transform: translateY(-1px);
+}
+
+/* ===== Group View Behavioral Classes ===== */
+
+.group-card.expanded {
+    border-color: hsl(var(--p) / 0.5);
+    box-shadow: 0 10px 22px hsl(var(--p) / 0.25);
+}
+
+/* ===== Drag and Drop Styles ===== */
+
+/* Drag clone (the floating card that follows the cursor) */
+.drag-clone {
+    border-radius: 0.5rem;
+    overflow: hidden;
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
+}
+
+/* Drop placeholder - glowing indicator */
+.drag-placeholder {
+    border: 3px dashed hsl(var(--p));
+    border-radius: 0.5rem;
+    background: linear-gradient(135deg, hsl(var(--p) / 0.15), hsl(var(--p) / 0.05));
+    box-shadow: inset 0 0 20px hsl(var(--p) / 0.1);
+    transition: all 0.15s ease;
+}
+
+/* Prevent text selection during drag */
+.dragging-active {
+    cursor: grabbing !important;
+}
+
+.dragging-active * {
+    user-select: none !important;
+    -webkit-user-select: none !important;
+}
+
+/* Cards get subtle highlight when grid is in drag mode */
+.dragging-active .server-card,
+.dragging-active .group-card {
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.dragging-active .server-card:hover,
+.dragging-active .group-card:hover {
+    transform: scale(1.02);
+    box-shadow: 0 8px 25px rgba(0,0,0,0.2);
+}
+
+/* ===== Compact Reorder Mode ===== */
+
+/* Grid adjusts for smaller cards in reorder mode */
+.servers-grid.reorder-mode {
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 0.5rem;
+}
+
+.group-grid.reorder-mode {
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 0.5rem;
+}
+
+.group-card-hosts.grid-mode.reorder-mode {
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 0.5rem;
+}
+
+/* Compact server card in reorder mode */
+.server-card.compact-reorder {
+    padding: 0.5rem 0.75rem !important;
+    min-height: auto !important;
+}
+
+.server-card.compact-reorder .card-body {
+    padding: 0 !important;
+    gap: 0 !important;
+}
+
+.server-card.compact-reorder .compact-content {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-weight: 600;
+}
+
+.server-card.compact-reorder .compact-content .status-dot {
+    font-size: 0.5rem;
+    line-height: 1;
+    flex-shrink: 0;
+}
+
+.server-card.compact-reorder .compact-content .server-name {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 0.875rem;
+}
+
+.server-card.compact-reorder .compact-content .os-icon {
+    font-size: 1rem;
+    flex-shrink: 0;
+}
+
+/* Compact group card in reorder mode */
+.group-card.compact-reorder {
+    padding: 0.5rem 0.75rem !important;
+}
+
+.group-card.compact-reorder .card-body {
+    padding: 0 !important;
+}
+
+.group-card.compact-reorder .compact-content {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-weight: 600;
+}
+
+.group-card.compact-reorder .compact-content .group-icon {
+    font-size: 1.25rem;
+}
+
+.group-card.compact-reorder .compact-content .group-name {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 0.875rem;
+    flex: 1;
+}
+
+.group-card.compact-reorder .compact-content .host-count {
+    background: hsl(var(--b3));
+    padding: 0.125rem 0.5rem;
+    border-radius: 9999px;
+    font-size: 0.75rem;
+    flex-shrink: 0;
+}
+
+/* Reorder mode button active state */
+.reorder-btn.active {
+    background: hsl(var(--wa)) !important;
+    color: hsl(var(--wac)) !important;
+    border-color: hsl(var(--wa)) !important;
+}
+
+/* Reorder mode banner */
+.reorder-mode-banner {
+    background: linear-gradient(90deg, hsl(var(--wa) / 0.2), hsl(var(--wa) / 0.1));
+    border: 2px solid hsl(var(--wa));
+    border-radius: 0.5rem;
+    padding: 0.5rem 1rem;
+    margin-bottom: 0.75rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+}
+
+.reorder-mode-banner .banner-text {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-weight: 600;
+    color: hsl(var(--wa));
+}
+
+.reorder-mode-banner .done-btn {
+    background: hsl(var(--su));
+    color: hsl(var(--suc));
+    border: none;
+    padding: 0.375rem 1rem;
+    border-radius: 0.375rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.reorder-mode-banner .done-btn:hover {
+    filter: brightness(1.1);
+    transform: translateY(-1px);
+}
+
+/* ===== Manage Dropdown Row ===== */
+
+/* Container for manage dropdown - matches card-actions style */
+.server-card .qp-card-actions-manage {
+    display: flex !important;
+    justify-content: center !important;
+    padding: 0.5rem !important;
+    margin-top: 0.25rem !important;
+    border: 2px solid oklch(var(--bc)) !important;
+    border-radius: 0.5rem !important;
+    background-color: oklch(var(--b2)) !important;
+}
+
+/* Manage button - same style as other card action buttons */
+.server-card .qp-card-actions-manage .manage-btn {
+    flex-shrink: 0 !important;
+    white-space: nowrap !important;
+    padding: 0.5rem 0.875rem !important;
+    font-size: 0.875rem !important;
+    font-weight: 600 !important;
+    border: 2px solid hsl(var(--bc) / 0.35) !important;
+    border-radius: 0.375rem !important;
+    background: hsl(var(--b1)) !important;
+    color: hsl(var(--bc)) !important;
+    cursor: pointer !important;
+    transition: all 0.15s ease !important;
+}
+
+.server-card .qp-card-actions-manage .manage-btn:hover {
+    background: hsl(var(--p) / 0.15) !important;
+    border-color: hsl(var(--p)) !important;
+    color: hsl(var(--p)) !important;
+    transform: translateY(-1px);
+}
+
+/* Dropdown menu styling */
+.server-card .qp-card-actions-manage .dropdown-content {
+    margin-bottom: 0.5rem !important;
+}
+
+.server-card .qp-card-actions-manage .dropdown-content li a {
+    padding: 0.625rem 1rem !important;
+    font-weight: 500 !important;
+}
+
+.server-card .qp-card-actions-manage .dropdown-content li a:hover {
+    background: hsl(var(--p) / 0.15) !important;
+    color: hsl(var(--p)) !important;
+}
+
+/* ===== Reusable Management Modal ===== */
+
+/* Large management modal - use for services, processes, etc. */
+.qp-manage-modal {
+    width: 95vw !important;
+    max-width: 1400px !important;
+    height: 85vh !important;
+    display: flex !important;
+    flex-direction: column !important;
+}

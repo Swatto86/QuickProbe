@@ -1,0 +1,42 @@
+# Rust build artifacts
+/target
+/src-tauri/target
+
+# Generated files
+/gen
+/src-tauri/gen
+
+# Generated icon files at root (icons/ directory is tracked)
+/*.png
+/*.ico
+/*.icns
+
+# Generated CSS (built from ui/input.css)
+ui/styles.css
+
+# Node modules
+node_modules/
+
+# Build logs and temporary files
+*.log
+*.pdb
+
+# WebDriver
+msedgedriver.exe
+
+# IDE
+.idea/
+*.swp
+*.swo
+
+# Claude Code settings (user-specific)
+.claude/
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Backup files
+*.bak
+*.backup

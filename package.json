@@ -1,0 +1,29 @@
+{
+  "name": "quickprobe",
+  "version": "1.0.0",
+  "description": "Active Directory credential validation tool",
+  "scripts": {
+    "tauri": "tauri",
+    "dev": "npm run build:css && tauri dev",
+    "build": "npm run build:css && tauri build",
+    "build:css": "npx tailwindcss -i ./ui/input.css -o ./ui/styles.css --minify",
+    "watch:css": "npx tailwindcss -i ./ui/input.css -o ./ui/styles.css --watch",
+    "test": "node ui/tests/all-tests.js",
+    "test:e2e": "npx wdio wdio.conf.cjs",
+    "test:e2e:spec": "npx wdio wdio.conf.cjs --spec"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.10.0",
+    "@wdio/cli": "^7.36.0",
+    "@wdio/local-runner": "^7.36.0",
+    "@wdio/mocha-framework": "^7.33.0",
+    "@wdio/spec-reporter": "^7.33.0",
+    "autoprefixer": "^10.4.23",
+    "daisyui": "^4.12.24",
+    "postcss": "^8.5.6",
+    "sharp": "^0.34.5",
+    "tailwindcss": "^3.4.19",
+    "to-ico": "^1.1.5",
+    "webdriverio": "^7.36.0"
+  }
+}

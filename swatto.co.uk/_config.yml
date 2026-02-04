@@ -1,0 +1,6 @@
+# Custom site configuration - no remote theme
+title: "QuickProbe - Windows Server Interrogation & RDP Launchpad"
+description: "QuickProbe is a proprietary Windows server interrogation tool from Swatto with live WinRM/SSH probes, credential-aware RDP launch, and a fast dashboard for Windows and Linux hosts."
+author: "Swatto"
+url: "https://swatto.co.uk"
+keywords: "QuickProbe, Windows server monitoring, WinRM, PowerShell remoting, SSH probes, RDP launcher, credential manager, Swatto"

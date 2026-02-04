@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cat:*)",
+      "Bash(cargo check:*)",
+      "Bash(cargo test:*)",
+      "Bash(cargo build:*)",
+      "Bash(cargo clippy:*)",
+      "Bash(cargo fmt:*)",
+      "Bash(npm run tauri:*)",
+      "Bash(tee:*)",
+      "Bash(ls:*)",
+      "Bash(magick:*)",
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nfeat: add probe persistence and fix location display and NSIS installer\n\n- Add SQLite persistence for probe results with schema v2 migration\n  - Create host_health table to store health snapshots\n  - Add save_health_snapshot\\(\\) and load_all_health_snapshots\\(\\) functions\n  - Implement Tauri commands persist_health_snapshot and load_health_snapshots\n  \n- Fix location display issues\n  - Add comprehensive debug logging for location matching\n  - Add primeHealthFromDatabase\\(\\) to load persisted health on startup\n  - Add mergeHealthIntoServers\\(\\) to merge persisted health with hosts\n  - Update initialization sequence to use persisted health as fallback\n  - Add testLocationMatching\\(\\) function for debugging\n  \n- Fix NSIS installer Start Menu shortcut\n  - Add \"resources\": [] to tauri.conf.json bundle configuration\n  - Prevents server binary from being included in installer\n  - Ensures Start Menu shortcut points to QuickProbe.exe\n  \n- Add required icon files for Windows build\n  - Generate icon-32.png, icon-128.png, icon-256.png, icon.ico from icon.png\n  \n- Fix compilation errors\n  - Fix string comparison in db.rs schema migration\n  - Add type annotation for JSON deserialization in main.rs\n\n🤖 Generated with [Claude Code]\\(https://claude.com/claude-code\\)\n\nCo-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git commit --no-verify -m \"$\\(cat <<''EOF''\nfeat: add probe persistence and fix location display and NSIS installer\n\n- Add SQLite persistence for probe results with schema v2 migration\n  - Create host_health table to store health snapshots\n  - Add save_health_snapshot\\(\\) and load_all_health_snapshots\\(\\) functions\n  - Implement Tauri commands persist_health_snapshot and load_health_snapshots\n  \n- Fix location display issues\n  - Add comprehensive debug logging for location matching\n  - Add primeHealthFromDatabase\\(\\) to load persisted health on startup\n  - Add mergeHealthIntoServers\\(\\) to merge persisted health with hosts\n  - Update initialization sequence to use persisted health as fallback\n  - Add testLocationMatching\\(\\) function for debugging\n  \n- Fix NSIS installer Start Menu shortcut\n  - Add \"resources\": [] to tauri.conf.json bundle configuration\n  - Prevents server binary from being included in installer\n  - Ensures Start Menu shortcut points to QuickProbe.exe\n  \n- Add required icon files for Windows build\n  - Generate icon-32.png, icon-128.png, icon-256.png, icon.ico from icon.png\n  \n- Fix compilation errors\n  - Fix string comparison in db.rs schema migration\n  - Add type annotation for JSON deserialization in main.rs\n\n🤖 Generated with [Claude Code]\\(https://claude.com/claude-code\\)\n\nCo-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>\nEOF\n\\)\")"
+    ]
+  }
+}
