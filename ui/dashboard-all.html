@@ -2644,6 +2644,10 @@
             if (searchInput) {
                 searchInput.addEventListener('input', (e) => {
                     searchTerm = e.target.value;
+                    // Reset filter when user starts typing
+                    if (searchTerm.trim()) {
+                        activeFilter = null;
+                    }
                     displayAllServers();
                 });
             }
