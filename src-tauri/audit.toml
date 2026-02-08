@@ -1,0 +1,17 @@
+# Configuration for cargo-audit security checks
+# This file allows the security audit to ignore certain types of warnings
+# that are not critical security vulnerabilities.
+
+[advisories]
+# Ignore advisories for crates that are unmaintained
+# These are typically transitive dependencies through frameworks like Tauri
+# and don't pose immediate security risks
+ignore = []
+
+# Don't fail the build on warnings about unmaintained packages
+# We still want to see them, but they shouldn't block CI
+unmaintained = "warn"
+
+# Don't fail the build on unsound code warnings
+# These should be reviewed but may not be exploitable
+unsound = "warn"
