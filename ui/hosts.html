@@ -1200,36 +1200,24 @@
                 const actions = document.createElement('div');
                 actions.className = 'card-actions justify-end mt-2 flex-wrap gap-2';
 
-                // Check button
-                const checkBtn = document.createElement('button');
-                checkBtn.className = 'btn btn-ghost btn-sm';
-                checkBtn.textContent = 'Check';
-                checkBtn.onclick = () => checkHostStatus(host.name, true);
+                // Refresh button (renamed from Check for consistency)
+                const refreshBtn = document.createElement('button');
+                refreshBtn.className = 'btn btn-ghost btn-sm';
+                refreshBtn.textContent = '🔄 Refresh';
+                refreshBtn.onclick = () => checkHostStatus(host.name, true);
 
-                // Edit button
-                const editBtn = document.createElement('button');
-                editBtn.className = 'btn btn-ghost btn-sm';
-                editBtn.textContent = 'Edit';
-                editBtn.onclick = () => startEdit(host.name);
+                // Actions dropdown
+                const actionsDiv = document.createElement('div');
+                actionsDiv.className = 'dropdown dropdown-end';
 
-                // Delete button
-                const deleteBtn = document.createElement('button');
-                deleteBtn.className = 'btn btn-ghost btn-sm text-error';
-                deleteBtn.textContent = 'Delete';
-                deleteBtn.onclick = () => deleteHost(host.name);
+                const actionsButton = document.createElement('button');
+                actionsButton.className = 'btn btn-ghost btn-sm';
+                actionsButton.setAttribute('tabindex', '0');
+                actionsButton.textContent = '⚙️ Actions';
 
-                // Manage dropdown
-                const manageDiv = document.createElement('div');
-                manageDiv.className = 'dropdown dropdown-end';
-
-                const manageButton = document.createElement('button');
-                manageButton.className = 'btn btn-ghost btn-sm';
-                manageButton.setAttribute('tabindex', '0');
-                manageButton.textContent = '⚙️ Manage';
-
-                const manageMenu = document.createElement('ul');
-                manageMenu.className = 'dropdown-content menu bg-base-200 rounded-box z-50 w-52 p-2 shadow-lg border border-base-300';
-                manageMenu.setAttribute('tabindex', '0');
+                const actionsMenu = document.createElement('ul');
+                actionsMenu.className = 'dropdown-content menu bg-base-200 rounded-box z-50 w-52 p-2 shadow-lg border border-base-300';
+                actionsMenu.setAttribute('tabindex', '0');
 
                 // Only show Explore option for Windows hosts
                 if (!isLinux) {
@@ -1250,18 +1238,35 @@
                         }
                     };
                     exploreItem.appendChild(exploreLink);
-                    manageMenu.appendChild(exploreItem);
+                    actionsMenu.appendChild(exploreItem);
                 }
 
-                manageDiv.appendChild(manageButton);
-                manageDiv.appendChild(manageMenu);
+                actionsDiv.appendChild(actionsButton);
+                actionsDiv.appendChild(actionsMenu);
 
-                actions.appendChild(checkBtn);
-                actions.appendChild(editBtn);
-                actions.appendChild(deleteBtn);
-                actions.appendChild(manageDiv);
+                // Second row buttons
+                const editBtn = document.createElement('button');
+                editBtn.className = 'btn btn-ghost btn-sm';
+                editBtn.textContent = 'Edit';
+                editBtn.onclick = () => startEdit(host.name);
+
+                const deleteBtn = document.createElement('button');
+                deleteBtn.className = 'btn btn-ghost btn-sm text-error';
+                deleteBtn.textContent = 'Delete';
+                deleteBtn.onclick = () => deleteHost(host.name);
+
+                // Add all buttons - Row 1: Refresh, Actions
+                actions.appendChild(refreshBtn);
+                actions.appendChild(actionsDiv);
+
+                // Create a visual separator or second row
+                const secondRow = document.createElement('div');
+                secondRow.className = 'flex gap-2 mt-1 w-full justify-end';
+                secondRow.appendChild(editBtn);
+                secondRow.appendChild(deleteBtn);
 
                 cardBody.appendChild(actions);
+                cardBody.appendChild(secondRow);
                 card.appendChild(cardBody);
                 list.appendChild(card);
             });
