@@ -3010,6 +3010,299 @@ async fn open_explorer_share(_server: String) -> Result<(), String> {
     Err("Explorer share opening is only supported on Windows".to_string())
 }
 
+/// Launch an MMC snap-in targeting a remote server
+///
+/// This command launches various Microsoft Management Console (MMC) snap-ins
+/// configured to manage a remote Windows server.
+#[cfg(windows)]
+#[tauri::command]
+async fn launch_mmc_snapin(server: String, snapin: String) -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
+    
+    let server = server.trim();
+    let snapin = snapin.trim().to_lowercase();
+    
+    if server.is_empty() {
+        return Err("Server name is required".to_string());
+    }
+    if snapin.is_empty() {
+        return Err("Snap-in name is required".to_string());
+    }
+
+    logger::log_info(&format!(
+        "launch_mmc_snapin: Launching {} for server '{}'",
+        snapin, server
+    ));
+
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+    const DETACHED_PROCESS: u32 = 0x00000008;
+
+    // Different snap-ins use different command-line arguments for remote targeting
+    let args = match snapin.as_str() {
+        "taskschd.msc" => {
+            // Task Scheduler uses /s instead of /computer=
+            vec![snapin.clone(), "/s".to_string(), server.to_string()]
+        }
+        "compmgmt.msc" | "eventvwr.msc" | "diskmgmt.msc" => {
+            // Most snap-ins use /computer=\\server format
+            vec![snapin.clone(), format!("/computer=\\\\{}", server)]
+        }
+        _ => {
+            // Default: try /computer= format
+            vec![snapin.clone(), format!("/computer={}", server)]
+        }
+    };
+
+    let result = Command::new("mmc.exe")
+        .args(&args)
+        .creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS)
+        .spawn();
+
+    match result {
+        Ok(_) => {
+            logger::log_info(&format!(
+                "launch_mmc_snapin: Successfully launched {} for '{}'",
+                snapin, server
+            ));
+            Ok(())
+        }
+        Err(e) => {
+            let error_msg = format!("Failed to launch {}: {}", snapin, e);
+            logger::log_error(&format!("launch_mmc_snapin: {}", error_msg));
+            Err(error_msg)
+        }
+    }
+}
+
+#[cfg(not(windows))]
+#[tauri::command]
+async fn launch_mmc_snapin(_server: String, _snapin: String) -> Result<(), String> {
+    Err("MMC snap-ins are only supported on Windows".to_string())
+}
+
+/// Launch regedit.exe for remote registry connection
+///
+/// Launches the Windows Registry Editor. The user will need to manually
+/// connect to the remote registry via File → Connect Network Registry.
+#[cfg(windows)]
+#[tauri::command]
+async fn launch_remote_registry(server: String) -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
+    
+    let server = server.trim();
+    
+    if server.is_empty() {
+        return Err("Server name is required".to_string());
+    }
+
+    logger::log_info(&format!(
+        "launch_remote_registry: Launching regedit for server '{}'",
+        server
+    ));
+
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+    const DETACHED_PROCESS: u32 = 0x00000008;
+
+    // Test connectivity to remote registry first
+    let test_result = Command::new("reg.exe")
+        .args(&["query", &format!("\\\\{}\\HKLM", server)])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output();
+
+    match test_result {
+        Ok(output) if !output.status.success() => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            logger::log_warn(&format!(
+                "launch_remote_registry: Registry connectivity test failed for '{}': {}",
+                server, stderr
+            ));
+            // Don't return error - still launch regedit, user might have permissions
+        }
+        Err(e) => {
+            logger::log_warn(&format!(
+                "launch_remote_registry: Could not test registry connectivity: {}",
+                e
+            ));
+        }
+        _ => {
+            logger::log_debug(&format!(
+                "launch_remote_registry: Registry connectivity test successful for '{}'",
+                server
+            ));
+        }
+    }
+
+    // Launch regedit
+    let result = Command::new("regedit.exe")
+        .creation_flags(DETACHED_PROCESS)
+        .spawn();
+
+    match result {
+        Ok(_) => {
+            logger::log_info(&format!(
+                "launch_remote_registry: Successfully launched regedit for '{}'",
+                server
+            ));
+            Ok(())
+        }
+        Err(e) => {
+            let error_msg = format!("Failed to launch regedit: {}", e);
+            logger::log_error(&format!("launch_remote_registry: {}", error_msg));
+            Err(error_msg)
+        }
+    }
+}
+
+#[cfg(not(windows))]
+#[tauri::command]
+async fn launch_remote_registry(_server: String) -> Result<(), String> {
+    Err("Remote Registry is only supported on Windows".to_string())
+}
+
+/// Restart a remote server (Windows or Linux)
+///
+/// For Windows: Uses PowerShell Restart-Computer cmdlet via WinRM
+/// For Linux: Uses SSH to execute shutdown -r now
+#[tauri::command]
+async fn remote_restart(server_name: String) -> Result<(), String> {
+    let server_name = server_name.trim();
+    
+    if server_name.is_empty() {
+        return Err("Server name is required".to_string());
+    }
+
+    logger::log_info(&format!(
+        "remote_restart: Initiating restart for '{}'",
+        server_name
+    ));
+
+    let os_hint = resolve_host_os_type(server_name).await;
+    let (credentials, _) = resolve_host_credentials(server_name).await?;
+
+    if os_hint.eq_ignore_ascii_case("linux") {
+        // Linux: Use SSH with shutdown command
+        let session = LinuxRemoteSession::connect(server_name.to_string(), credentials)
+            .await
+            .map_err(|e| format!("Failed to connect to {}: {}", server_name, e))?;
+
+        // Use sudo shutdown -r now to restart immediately
+        let restart_cmd = "sudo shutdown -r now";
+        
+        let result = session.execute_command(restart_cmd).await;
+        
+        match result {
+            Ok(_) => {
+                logger::log_info(&format!(
+                    "remote_restart: Successfully initiated restart for '{}' (Linux)",
+                    server_name
+                ));
+                Ok(())
+            }
+            Err(e) => {
+                let error_msg = format!("Failed to restart Linux server: {}", e);
+                logger::log_error(&format!("remote_restart: {}", error_msg));
+                Err(error_msg)
+            }
+        }
+    } else {
+        // Windows: Use WinRM/PowerShell
+        let session = WindowsRemoteSession::connect(server_name.to_string(), credentials)
+            .await
+            .map_err(|e| format!("Failed to connect to {}: {}", server_name, e))?;
+
+        let restart_script = format!("Restart-Computer -ComputerName {} -Force", server_name);
+        
+        let result = session.execute_powershell(&restart_script).await;
+        
+        match result {
+            Ok(_) => {
+                logger::log_info(&format!(
+                    "remote_restart: Successfully initiated restart for '{}' (Windows)",
+                    server_name
+                ));
+                Ok(())
+            }
+            Err(e) => {
+                let error_msg = format!("Failed to restart Windows server: {}", e);
+                logger::log_error(&format!("remote_restart: {}", error_msg));
+                Err(error_msg)
+            }
+        }
+    }
+}
+
+/// Shutdown a remote server (Windows or Linux)
+///
+/// For Windows: Uses PowerShell Stop-Computer cmdlet via WinRM
+/// For Linux: Uses SSH to execute shutdown -h now
+#[tauri::command]
+async fn remote_shutdown(server_name: String) -> Result<(), String> {
+    let server_name = server_name.trim();
+    
+    if server_name.is_empty() {
+        return Err("Server name is required".to_string());
+    }
+
+    logger::log_info(&format!(
+        "remote_shutdown: Initiating shutdown for '{}'",
+        server_name
+    ));
+
+    let os_hint = resolve_host_os_type(server_name).await;
+    let (credentials, _) = resolve_host_credentials(server_name).await?;
+
+    if os_hint.eq_ignore_ascii_case("linux") {
+        // Linux: Use SSH with shutdown command
+        let session = LinuxRemoteSession::connect(server_name.to_string(), credentials)
+            .await
+            .map_err(|e| format!("Failed to connect to {}: {}", server_name, e))?;
+
+        // Use sudo shutdown -h now to halt immediately
+        let shutdown_cmd = "sudo shutdown -h now";
+        
+        let result = session.execute_command(shutdown_cmd).await;
+        
+        match result {
+            Ok(_) => {
+                logger::log_info(&format!(
+                    "remote_shutdown: Successfully initiated shutdown for '{}' (Linux)",
+                    server_name
+                ));
+                Ok(())
+            }
+            Err(e) => {
+                let error_msg = format!("Failed to shutdown Linux server: {}", e);
+                logger::log_error(&format!("remote_shutdown: {}", error_msg));
+                Err(error_msg)
+            }
+        }
+    } else {
+        // Windows: Use WinRM/PowerShell
+        let session = WindowsRemoteSession::connect(server_name.to_string(), credentials)
+            .await
+            .map_err(|e| format!("Failed to connect to {}: {}", server_name, e))?;
+
+        let shutdown_script = format!("Stop-Computer -ComputerName {} -Force", server_name);
+        
+        let result = session.execute_powershell(&shutdown_script).await;
+        
+        match result {
+            Ok(_) => {
+                logger::log_info(&format!(
+                    "remote_shutdown: Successfully initiated shutdown for '{}' (Windows)",
+                    server_name
+                ));
+                Ok(())
+            }
+            Err(e) => {
+                let error_msg = format!("Failed to shutdown Windows server: {}", e);
+                logger::log_error(&format!("remote_shutdown: {}", error_msg));
+                Err(error_msg)
+            }
+        }
+    }
+}
+
 /// Save notes for a server in hosts.csv
 ///
 /// Updates or creates the notes field for a specific server.
@@ -6367,6 +6660,10 @@ fn main() {
             launch_rdp,
             launch_ssh,
             open_explorer_share,
+            launch_mmc_snapin,
+            launch_remote_registry,
+            remote_restart,
+            remote_shutdown,
             check_autostart,
             toggle_autostart,
             get_start_hidden_setting,
