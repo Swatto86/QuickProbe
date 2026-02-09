@@ -137,6 +137,21 @@
         </header>
 
         <!-- Search -->
+        <!-- Elevation Warning Banner (shown when not running as admin) -->
+        <div id="elevation-banner" class="hidden alert alert-warning shadow-lg mb-4">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24"
+                stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+            <div>
+                <span class="font-semibold">Limited functionality:</span> QuickProbe is not running as Administrator.
+                Some management features (MMC snap-ins, remote registry, C$ shares) may prompt for credentials or fail.
+                Run as Administrator for full access.
+            </div>
+            <button id="elevation-banner-dismiss" class="btn btn-ghost btn-sm" type="button" title="Dismiss">✕</button>
+        </div>
+
         <section class="card bg-base-200 shadow-lg mb-4">
             <div class="card-body p-4">
                 <div class="flex gap-2 items-center flex-wrap">
@@ -2518,6 +2533,29 @@
                 initErrorDialog();
                 initDetailsDialog();
                 initHostPreviewModal();
+
+                // Check for admin elevation and show warning banner if needed
+                if (window.__TAURI__) {
+                    try {
+                        const isElevated = await window.__TAURI__.core.invoke('check_is_elevated');
+                        if (!isElevated) {
+                            const banner = document.getElementById('elevation-banner');
+                            const dismissed = sessionStorage.getItem('qp_elevation_dismissed');
+                            if (banner && !dismissed) {
+                                banner.classList.remove('hidden');
+                                const dismissBtn = document.getElementById('elevation-banner-dismiss');
+                                if (dismissBtn) {
+                                    dismissBtn.addEventListener('click', () => {
+                                        banner.classList.add('hidden');
+                                        sessionStorage.setItem('qp_elevation_dismissed', '1');
+                                    });
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        console.warn('Elevation check failed:', e);
+                    }
+                }
 
                 const hostsChanged = consumeHostsChangedFlag();
                 const cacheState = hydrateFromCache();
