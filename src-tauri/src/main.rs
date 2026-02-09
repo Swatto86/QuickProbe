@@ -6589,8 +6589,8 @@ fn check_is_elevated() -> bool {
 /// Relaunch the current process with Administrator elevation via UAC.
 ///
 /// Uses the Windows ShellExecute "runas" verb to trigger a UAC prompt.
-/// If the user accepts, a new elevated instance starts and this one should exit.
-/// If the user declines UAC, returns an error.
+/// The current instance exits first so the single-instance mutex is released
+/// before the elevated process starts. If the user declines UAC, returns an error.
 #[cfg(windows)]
 #[tauri::command]
 async fn relaunch_elevated(app: tauri::AppHandle) -> Result<(), String> {
@@ -6606,43 +6606,35 @@ async fn relaunch_elevated(app: tauri::AppHandle) -> Result<(), String> {
 
     const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-    // Use PowerShell Start-Process -Verb RunAs to trigger UAC
+    // Build the PowerShell command but don't spawn yet — we need to exit first
+    // so the single-instance mutex is released before the elevated process starts.
     let exe_str = exe_path.to_string_lossy().to_string();
+
+    // Use a short PowerShell wrapper that waits for our process to exit, then launches elevated.
+    // We pass our current PID so the wrapper can Wait-Process on it.
+    let current_pid = std::process::id();
+    let ps_script = format!(
+        "try {{ Wait-Process -Id {} -Timeout 10 -ErrorAction SilentlyContinue }} catch {{}}; Start-Process -FilePath '{}' -Verb RunAs",
+        current_pid,
+        exe_str.replace("'", "''")
+    );
+
     let result = Command::new("powershell.exe")
         .args([
             "-NoProfile",
             "-NonInteractive",
             "-Command",
-            &format!(
-                "Start-Process -FilePath '{}' -Verb RunAs",
-                exe_str.replace("'", "''")
-            ),
+            &ps_script,
         ])
         .creation_flags(CREATE_NO_WINDOW)
         .spawn();
 
     match result {
-        Ok(mut child) => {
-            // Wait briefly for UAC to complete
-            match child.wait() {
-                Ok(status) if status.success() => {
-                    logger::log_info("relaunch_elevated: Elevated process started, exiting current instance");
-                    // Give the new instance a moment to start
-                    std::thread::sleep(std::time::Duration::from_millis(500));
-                    app.exit(0);
-                    Ok(())
-                }
-                Ok(status) => {
-                    let msg = format!("UAC elevation was declined or failed (exit code: {:?})", status.code());
-                    logger::log_info(&format!("relaunch_elevated: {}", msg));
-                    Err(msg)
-                }
-                Err(e) => {
-                    let msg = format!("Failed to wait for elevation process: {}", e);
-                    logger::log_error(&format!("relaunch_elevated: {}", msg));
-                    Err(msg)
-                }
-            }
+        Ok(_) => {
+            logger::log_info("relaunch_elevated: Launcher spawned, exiting current instance to release single-instance lock");
+            // Exit immediately so the mutex is freed before the elevated process starts
+            app.exit(0);
+            Ok(())
         }
         Err(e) => {
             let msg = format!("Failed to request elevation: {}", e);
