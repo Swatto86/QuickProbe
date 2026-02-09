@@ -339,7 +339,7 @@ fn kv_value_or_default(conn: &rusqlite::Connection, key: &str) -> Result<Option<
 }
 
 fn parse_kv_json(raw: Option<String>) -> Option<serde_json::Value> {
-    raw.map(|val| serde_json::from_str(&val).unwrap_or_else(|_| serde_json::Value::String(val)))
+    raw.map(|val| serde_json::from_str(&val).unwrap_or(serde_json::Value::String(val)))
 }
 
 fn merge_settings_with_defaults(value: serde_json::Value) -> serde_json::Value {
@@ -1540,6 +1540,7 @@ async fn export_hosts_csv(destination: String) -> Result<String, String> {
 ///
 /// This would improve testability and readability.
 #[allow(dead_code)] // Kept for backward compatibility, superseded by extract_health_fields_comprehensive
+#[allow(clippy::type_complexity)] // Complex tuple return type, but function is deprecated
 fn extract_health_fields(
     health_json: &str,
     timestamp: &str,
@@ -2023,7 +2024,7 @@ fn extract_health_fields_comprehensive(health_json: &str, timestamp: &str) -> Cs
     if let Some(alerts) = health.get("disk_alerts").and_then(|a| a.as_array()) {
         let alert_info: Vec<String> = alerts
             .iter()
-            .filter_map(|a| {
+            .map(|a| {
                 let drive = a
                     .get("drive_letter")
                     .and_then(|v| v.as_str())
@@ -2032,7 +2033,7 @@ fn extract_health_fields_comprehensive(health_json: &str, timestamp: &str) -> Cs
                     .get("percent_free")
                     .and_then(|v| v.as_f64())
                     .unwrap_or(0.0);
-                Some(format!("{}: {:.0}% free (LOW)", drive, pct_free))
+                format!("{}: {:.0}% free (LOW)", drive, pct_free)
             })
             .collect();
         fields.disk_alerts = alert_info.join("; ");
@@ -2412,9 +2413,7 @@ fn validate_rdp_parameter(value: &str, param_name: &str) -> Result<(), String> {
 
         // Check for path traversal attempts in hostname (could write to Startup folder)
         if value.contains("..") || value.contains('\\') || value.contains('/') {
-            return Err(format!(
-                "Invalid hostname: contains path separators or traversal sequences"
-            ));
+            return Err("Invalid hostname: contains path separators or traversal sequences".to_string());
         }
 
         // Basic hostname validation: alphanumeric, dots, hyphens, colons (for ports)
@@ -2423,9 +2422,7 @@ fn validate_rdp_parameter(value: &str, param_name: &str) -> Result<(), String> {
             .chars()
             .all(|c| c.is_alphanumeric() || c == '.' || c == '-' || c == ':')
         {
-            return Err(format!(
-                "Invalid hostname: contains invalid characters (only alphanumeric, dots, hyphens, and colons allowed)"
-            ));
+            return Err("Invalid hostname: contains invalid characters (only alphanumeric, dots, hyphens, and colons allowed)".to_string());
         }
     }
 
@@ -2962,13 +2959,13 @@ async fn open_explorer_share(server: String) -> Result<(), String> {
     // Use net use to mount the share with credentials
     // /delete first to clear any existing connection
     let _ = Command::new("net")
-        .args(&["use", &unc_path, "/delete", "/y"])
+        .args(["use", &unc_path, "/delete", "/y"])
         .creation_flags(CREATE_NO_WINDOW)
         .output();
 
     // Now mount with credentials
     let output = Command::new("net")
-        .args(&[
+        .args([
             "use",
             &unc_path,
             password,
@@ -3013,15 +3010,16 @@ async fn open_explorer_share(_server: String) -> Result<(), String> {
 /// Launch an MMC snap-in targeting a remote server
 ///
 /// This command launches various Microsoft Management Console (MMC) snap-ins
-/// configured to manage a remote Windows server.
+/// configured to manage a remote Windows server. Uses PowerShell to request
+/// elevation via UAC prompt if needed.
 #[cfg(windows)]
 #[tauri::command]
 async fn launch_mmc_snapin(server: String, snapin: String) -> Result<(), String> {
     use std::os::windows::process::CommandExt;
-    
+
     let server = server.trim();
     let snapin = snapin.trim().to_lowercase();
-    
+
     if server.is_empty() {
         return Err("Server name is required".to_string());
     }
@@ -3034,28 +3032,58 @@ async fn launch_mmc_snapin(server: String, snapin: String) -> Result<(), String>
         snapin, server
     ));
 
+    // Clear MMC cache to prevent showing previous console during load
+    // MMC stores cached console state in %APPDATA%\Microsoft\MMC\
+    if let Ok(appdata) = std::env::var("APPDATA") {
+        let mmc_cache_path = PathBuf::from(appdata).join("Microsoft").join("MMC");
+        if mmc_cache_path.exists() {
+            logger::log_debug(&format!(
+                "launch_mmc_snapin: Clearing MMC cache at {:?}",
+                mmc_cache_path
+            ));
+            // Delete all files in the MMC cache directory (but not subdirectories)
+            if let Ok(entries) = std::fs::read_dir(&mmc_cache_path) {
+                for entry in entries.flatten() {
+                    if let Ok(metadata) = entry.metadata() {
+                        if metadata.is_file() {
+                            let _ = std::fs::remove_file(entry.path());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     const CREATE_NO_WINDOW: u32 = 0x08000000;
-    const DETACHED_PROCESS: u32 = 0x00000008;
 
     // Different snap-ins use different command-line arguments for remote targeting
-    let args = match snapin.as_str() {
+    // PowerShell ArgumentList needs args as comma-separated quoted strings
+    let ps_args = match snapin.as_str() {
         "taskschd.msc" => {
             // Task Scheduler uses /s instead of /computer=
-            vec![snapin.clone(), "/s".to_string(), server.to_string()]
+            format!("'{}','/s','{}'", snapin, server)
         }
         "compmgmt.msc" | "eventvwr.msc" | "diskmgmt.msc" => {
             // Most snap-ins use /computer=\\server format
-            vec![snapin.clone(), format!("/computer=\\\\{}", server)]
+            format!("'{}','/computer=\\\\{}'", snapin, server)
         }
         _ => {
             // Default: try /computer= format
-            vec![snapin.clone(), format!("/computer={}", server)]
+            format!("'{}','/computer={}'", snapin, server)
         }
     };
 
-    let result = Command::new("mmc.exe")
-        .args(&args)
-        .creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS)
+    // Use PowerShell Start-Process with -Verb RunAs to trigger UAC elevation if needed
+    // This allows the user to approve elevation rather than getting a silent failure
+    // ArgumentList must be comma-separated quoted values for proper parsing
+    let ps_script = format!(
+        "Start-Process -FilePath 'mmc.exe' -ArgumentList {} -Verb RunAs",
+        ps_args
+    );
+
+    let result = Command::new("powershell.exe")
+        .args(["-NoProfile", "-NonInteractive", "-Command", &ps_script])
+        .creation_flags(CREATE_NO_WINDOW)
         .spawn();
 
     match result {
@@ -3082,15 +3110,15 @@ async fn launch_mmc_snapin(_server: String, _snapin: String) -> Result<(), Strin
 
 /// Launch regedit.exe for remote registry connection
 ///
-/// Launches the Windows Registry Editor. The user will need to manually
-/// connect to the remote registry via File → Connect Network Registry.
+/// Launches the Windows Registry Editor and automatically connects to the remote registry
+/// using PowerShell automation to interact with the regedit UI.
 #[cfg(windows)]
 #[tauri::command]
 async fn launch_remote_registry(server: String) -> Result<(), String> {
     use std::os::windows::process::CommandExt;
-    
+
     let server = server.trim();
-    
+
     if server.is_empty() {
         return Err("Server name is required".to_string());
     }
@@ -3101,11 +3129,10 @@ async fn launch_remote_registry(server: String) -> Result<(), String> {
     ));
 
     const CREATE_NO_WINDOW: u32 = 0x08000000;
-    const DETACHED_PROCESS: u32 = 0x00000008;
 
     // Test connectivity to remote registry first
     let test_result = Command::new("reg.exe")
-        .args(&["query", &format!("\\\\{}\\HKLM", server)])
+        .args(["query", &format!("\\\\{}\\HKLM", server)])
         .creation_flags(CREATE_NO_WINDOW)
         .output();
 
@@ -3116,13 +3143,17 @@ async fn launch_remote_registry(server: String) -> Result<(), String> {
                 "launch_remote_registry: Registry connectivity test failed for '{}': {}",
                 server, stderr
             ));
-            // Don't return error - still launch regedit, user might have permissions
+            return Err(format!(
+                "Cannot connect to remote registry on {}. Ensure RemoteRegistry service is running and you have permissions.",
+                server
+            ));
         }
         Err(e) => {
             logger::log_warn(&format!(
                 "launch_remote_registry: Could not test registry connectivity: {}",
                 e
             ));
+            return Err(format!("Failed to test registry connectivity: {}", e));
         }
         _ => {
             logger::log_debug(&format!(
@@ -3132,9 +3163,20 @@ async fn launch_remote_registry(server: String) -> Result<(), String> {
         }
     }
 
-    // Launch regedit
-    let result = Command::new("regedit.exe")
-        .creation_flags(DETACHED_PROCESS)
+    // Launch regedit and use PowerShell to automate the connection to remote registry
+    // This PowerShell script:
+    // 1. Launches regedit with elevation
+    // 2. Waits for it to start
+    // 3. Uses UI automation to select File -> Connect Network Registry
+    // 4. Enters the server name and connects
+    let ps_script = format!(
+        r#"Start-Process -FilePath 'regedit.exe' -Verb RunAs -PassThru | Out-Null; Start-Sleep -Milliseconds 800; Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('%F'); Start-Sleep -Milliseconds 150; [System.Windows.Forms.SendKeys]::SendWait('C'); Start-Sleep -Milliseconds 300; [System.Windows.Forms.SendKeys]::SendWait('{}'); Start-Sleep -Milliseconds 150; [System.Windows.Forms.SendKeys]::SendWait('{{ENTER}}')"#,
+        server.replace("\\", "\\\\").replace("'", "''")
+    );
+
+    let result = Command::new("powershell.exe")
+        .args(["-NoProfile", "-NonInteractive", "-Command", &ps_script])
+        .creation_flags(CREATE_NO_WINDOW)
         .spawn();
 
     match result {
@@ -3166,7 +3208,7 @@ async fn launch_remote_registry(_server: String) -> Result<(), String> {
 #[tauri::command]
 async fn remote_restart(server_name: String) -> Result<(), String> {
     let server_name = server_name.trim();
-    
+
     if server_name.is_empty() {
         return Err("Server name is required".to_string());
     }
@@ -3187,9 +3229,9 @@ async fn remote_restart(server_name: String) -> Result<(), String> {
 
         // Use sudo shutdown -r now to restart immediately
         let restart_cmd = "sudo shutdown -r now";
-        
+
         let result = session.execute_command(restart_cmd).await;
-        
+
         match result {
             Ok(_) => {
                 logger::log_info(&format!(
@@ -3211,9 +3253,9 @@ async fn remote_restart(server_name: String) -> Result<(), String> {
             .map_err(|e| format!("Failed to connect to {}: {}", server_name, e))?;
 
         let restart_script = format!("Restart-Computer -ComputerName {} -Force", server_name);
-        
+
         let result = session.execute_powershell(&restart_script).await;
-        
+
         match result {
             Ok(_) => {
                 logger::log_info(&format!(
@@ -3238,7 +3280,7 @@ async fn remote_restart(server_name: String) -> Result<(), String> {
 #[tauri::command]
 async fn remote_shutdown(server_name: String) -> Result<(), String> {
     let server_name = server_name.trim();
-    
+
     if server_name.is_empty() {
         return Err("Server name is required".to_string());
     }
@@ -3259,9 +3301,9 @@ async fn remote_shutdown(server_name: String) -> Result<(), String> {
 
         // Use sudo shutdown -h now to halt immediately
         let shutdown_cmd = "sudo shutdown -h now";
-        
+
         let result = session.execute_command(shutdown_cmd).await;
-        
+
         match result {
             Ok(_) => {
                 logger::log_info(&format!(
@@ -3283,9 +3325,9 @@ async fn remote_shutdown(server_name: String) -> Result<(), String> {
             .map_err(|e| format!("Failed to connect to {}: {}", server_name, e))?;
 
         let shutdown_script = format!("Stop-Computer -ComputerName {} -Force", server_name);
-        
+
         let result = session.execute_powershell(&shutdown_script).await;
-        
+
         match result {
             Ok(_) => {
                 logger::log_info(&format!(
@@ -4759,7 +4801,7 @@ try {{
         }
         Err(e) => {
             let elapsed_ms = start.elapsed().unwrap_or_default().as_millis();
-            let error_msg = format!("{}", e);
+            let error_msg = e.to_string();
             logger::log_warn(&format!(
                 "execute_remote_powershell: ERROR '{}' {}ms error='{}'",
                 server_name, elapsed_ms, error_msg
@@ -4856,7 +4898,7 @@ async fn execute_remote_ssh(
         }
         Err(e) => {
             let elapsed_ms = start.elapsed().unwrap_or_default().as_millis();
-            let error_msg = format!("{}", e);
+            let error_msg = e.to_string();
             logger::log_warn(&format!(
                 "execute_remote_ssh: ERROR '{}' {}ms error='{}'",
                 server_name, elapsed_ms, error_msg
@@ -4929,7 +4971,7 @@ async fn execute_remote_ssh_pty(
         }
         Err(e) => {
             let elapsed_ms = start.elapsed().unwrap_or_default().as_millis();
-            let error_msg = format!("{}", e);
+            let error_msg = e.to_string();
             logger::log_warn(&format!(
                 "execute_remote_ssh_pty: ERROR '{}' {}ms error='{}'",
                 server_name, elapsed_ms, error_msg
