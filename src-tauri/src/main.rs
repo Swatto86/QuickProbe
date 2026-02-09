@@ -6544,6 +6544,48 @@ async fn download_and_install_update(update_info: UpdateInfo) -> Result<(), Stri
     updater::download_and_install_impl(update_info).await
 }
 
+// ============================================================================
+// Elevation Check
+// ============================================================================
+
+/// Check whether the current process is running with local administrator rights.
+///
+/// Full host management features (MMC snap-ins, remote registry, etc.) require
+/// elevation. The frontend uses this to display a warning banner when running
+/// without admin privileges.
+#[cfg(windows)]
+#[tauri::command]
+fn check_is_elevated() -> bool {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+    // "net session" succeeds only when running elevated
+    match Command::new("net")
+        .arg("session")
+        .creation_flags(CREATE_NO_WINDOW)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+    {
+        Ok(status) => {
+            let elevated = status.success();
+            logger::log_info(&format!("check_is_elevated: {}", elevated));
+            elevated
+        }
+        Err(e) => {
+            logger::log_warn(&format!("check_is_elevated: failed to run net session: {}", e));
+            false
+        }
+    }
+}
+
+#[cfg(not(windows))]
+#[tauri::command]
+fn check_is_elevated() -> bool {
+    // On non-Windows platforms, assume full access
+    true
+}
+
 fn main() {
     logger::init_dev_logger();
     logger::log_info("QuickProbe starting");
@@ -6783,7 +6825,8 @@ fn main() {
             log_error,
             open_logs_folder,
             check_for_update,
-            download_and_install_update
+            download_and_install_update,
+            check_is_elevated
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
