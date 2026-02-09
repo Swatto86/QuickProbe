@@ -5847,7 +5847,7 @@
                     compMgmtBtn.addEventListener('click', (e) => {
                         e.stopPropagation();
                         e.preventDefault();
-                        launchMmcSnapin(server.name, 'compmgmt.msc', 'Computer Management');
+                        launchComputerManagement(server.name);
                     });
                 }
 
@@ -5857,7 +5857,7 @@
                     eventViewerBtn.addEventListener('click', (e) => {
                         e.stopPropagation();
                         e.preventDefault();
-                        launchMmcSnapin(server.name, 'eventvwr.msc', 'Event Viewer');
+                        launchEventViewer(server.name);
                     });
                 }
 
@@ -5867,7 +5867,7 @@
                     taskSchedulerBtn.addEventListener('click', (e) => {
                         e.stopPropagation();
                         e.preventDefault();
-                        launchMmcSnapin(server.name, 'taskschd.msc', 'Task Scheduler');
+                        launchTaskScheduler(server.name);
                     });
                 }
 
@@ -6268,7 +6268,7 @@
                 compMgmtBtn.addEventListener('click', (e) => {
                     e.stopPropagation();
                     e.preventDefault();
-                    launchMmcSnapin(server.name, 'compmgmt.msc', 'Computer Management');
+                    launchComputerManagement(server.name);
                 });
             }
 
@@ -6278,7 +6278,7 @@
                 eventViewerBtn.addEventListener('click', (e) => {
                     e.stopPropagation();
                     e.preventDefault();
-                    launchMmcSnapin(server.name, 'eventvwr.msc', 'Event Viewer');
+                    launchEventViewer(server.name);
                 });
             }
 
@@ -6288,7 +6288,7 @@
                 taskSchedulerBtn.addEventListener('click', (e) => {
                     e.stopPropagation();
                     e.preventDefault();
-                    launchMmcSnapin(server.name, 'taskschd.msc', 'Task Scheduler');
+                    launchTaskScheduler(server.name);
                 });
             }
 
@@ -7134,9 +7134,13 @@
          * @param {string} snapin - The MMC snap-in name (e.g., "compmgmt.msc")
          * @param {string} label - User-friendly label for notifications
          */
-        async function launchMmcSnapin(serverName, snapin, label) {
-            if (!serverName || !snapin) {
-                showError('Server name and snap-in are required');
+        /**
+         * Launch Event Viewer using PowerShell (no UAC required)
+         * @param {string} serverName - The target server name
+         */
+        async function launchEventViewer(serverName) {
+            if (!serverName) {
+                showError('Server name is required');
                 return;
             }
             if (!window.__TAURI__) {
@@ -7146,15 +7150,62 @@
 
             try {
                 const { invoke } = window.__TAURI__.core;
-                await invoke('launch_mmc_snapin', {
-                    server: serverName,
-                    snapin
-                });
-                showInfo(`Opening ${label} for ${serverName}`);
+                await invoke('launch_event_viewer', { server: serverName });
+                showInfo(`Opening Event Viewer for ${serverName}`);
             } catch (err) {
                 const message = err?.toString?.() ? err.toString() : `${err}`;
-                showError(`Failed to launch ${label}: ${message}`);
-                logDebug(`launch_mmc_snapin failed for ${serverName} (${snapin}): ${message}`);
+                showError(`Failed to launch Event Viewer: ${message}`);
+                logDebug(`launch_event_viewer failed for ${serverName}: ${message}`);
+            }
+        }
+
+        /**
+         * Launch Task Scheduler using PowerShell (no UAC required)
+         * @param {string} serverName - The target server name
+         */
+        async function launchTaskScheduler(serverName) {
+            if (!serverName) {
+                showError('Server name is required');
+                return;
+            }
+            if (!window.__TAURI__) {
+                showError('Tauri API not available');
+                return;
+            }
+
+            try {
+                const { invoke } = window.__TAURI__.core;
+                await invoke('launch_task_scheduler', { server: serverName });
+                showInfo(`Opening Task Scheduler for ${serverName}`);
+            } catch (err) {
+                const message = err?.toString?.() ? err.toString() : `${err}`;
+                showError(`Failed to launch Task Scheduler: ${message}`);
+                logDebug(`launch_task_scheduler failed for ${serverName}: ${message}`);
+            }
+        }
+
+        /**
+         * Launch Computer Management using PowerShell (no UAC required)
+         * @param {string} serverName - The target server name
+         */
+        async function launchComputerManagement(serverName) {
+            if (!serverName) {
+                showError('Server name is required');
+                return;
+            }
+            if (!window.__TAURI__) {
+                showError('Tauri API not available');
+                return;
+            }
+
+            try {
+                const { invoke } = window.__TAURI__.core;
+                await invoke('launch_computer_management', { server: serverName });
+                showInfo(`Opening Computer Management for ${serverName}`);
+            } catch (err) {
+                const message = err?.toString?.() ? err.toString() : `${err}`;
+                showError(`Failed to launch Computer Management: ${message}`);
+                logDebug(`launch_computer_management failed for ${serverName}: ${message}`);
             }
         }
 

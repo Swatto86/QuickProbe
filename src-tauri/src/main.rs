@@ -3014,52 +3014,57 @@ async fn open_explorer_share(_server: String) -> Result<(), String> {
 /// elevation via UAC prompt if needed.
 #[cfg(windows)]
 #[tauri::command]
-async fn launch_mmc_snapin(server: String, snapin: String) -> Result<(), String> {
+async fn launch_event_viewer(server: String) -> Result<(), String> {
     let server = server.trim();
-    let snapin = snapin.trim().to_lowercase();
 
     if server.is_empty() {
         return Err("Server name is required".to_string());
     }
-    if snapin.is_empty() {
-        return Err("Snap-in name is required".to_string());
-    }
 
     logger::log_info(&format!(
-        "launch_mmc_snapin: Launching {} for server '{}'",
-        snapin, server
+        "launch_event_viewer: Launching Event Viewer for server '{}'",
+        server
     ));
 
-    // Build arguments for MMC based on snap-in type
-    // Arguments must be passed separately, not as a single string
-    let result = match snapin.as_str() {
-        "eventvwr.msc" => {
-            // Event Viewer requires /computer: with colon (not equals)
-            Command::new("mmc.exe")
-                .arg(&snapin)
-                .arg(format!("/computer:{}", server))
-                .spawn()
-        }
-        _ => {
-            // Most snap-ins use /computer=\\server format
-            Command::new("mmc.exe")
-                .arg(&snapin)
-                .arg(format!("/computer=\\\\{}", server))
-                .spawn()
-        }
-    };
+    // Retrieve stored credentials
+    let (credentials, _) = resolve_host_credentials(server).await?;
+    let username = credentials.username().as_str();
+    let password = credentials.password().as_str();
+    
+    // Build PowerShell script that creates credential and executes remotely
+    let ps_script = format!(
+        r#"$secpass = ConvertTo-SecureString '{}' -AsPlainText -Force
+$cred = New-Object System.Management.Automation.PSCredential('{}', $secpass)
+Invoke-Command -ComputerName {} -Credential $cred -ScriptBlock {{
+    Get-WinEvent -LogName System,Application -MaxEvents 1000 | Select-Object TimeCreated,LevelDisplayName,ProviderName,Id,Message
+}} | Out-GridView -Title 'Event Viewer - {}'
+"#,
+        password.replace("'", "''"),
+        username,
+        server,
+        server
+    );
+
+    let result = Command::new("powershell.exe")
+        .args([
+            "-NoProfile",
+            "-WindowStyle", "Normal",
+            "-Command",
+            &ps_script,
+        ])
+        .spawn();
 
     match result {
         Ok(_) => {
             logger::log_info(&format!(
-                "launch_mmc_snapin: Successfully launched {} for '{}'",
-                snapin, server
+                "launch_event_viewer: Successfully launched Event Viewer for '{}'",
+                server
             ));
             Ok(())
         }
         Err(e) => {
-            let error_msg = format!("Failed to launch {}: {}", snapin, e);
-            logger::log_error(&format!("launch_mmc_snapin: {}", error_msg));
+            let error_msg = format!("Failed to launch Event Viewer: {}", e);
+            logger::log_error(&format!("launch_event_viewer: {}", error_msg));
             Err(error_msg)
         }
     }
@@ -3067,8 +3072,136 @@ async fn launch_mmc_snapin(server: String, snapin: String) -> Result<(), String>
 
 #[cfg(not(windows))]
 #[tauri::command]
-async fn launch_mmc_snapin(_server: String, _snapin: String) -> Result<(), String> {
-    Err("MMC snap-ins are only supported on Windows".to_string())
+async fn launch_event_viewer(_server: String) -> Result<(), String> {
+    Err("Event Viewer is only supported on Windows".to_string())
+}
+
+#[cfg(windows)]
+#[tauri::command]
+async fn launch_task_scheduler(server: String) -> Result<(), String> {
+    let server = server.trim();
+
+    if server.is_empty() {
+        return Err("Server name is required".to_string());
+    }
+
+    logger::log_info(&format!(
+        "launch_task_scheduler: Launching Task Scheduler for server '{}'",
+        server
+    ));
+
+    // Retrieve stored credentials
+    let (credentials, _) = resolve_host_credentials(server).await?;
+    let username = credentials.username().as_str();
+    let password = credentials.password().as_str();
+    
+    // Build PowerShell script that creates credential and executes remotely
+    let ps_script = format!(
+        r#"$secpass = ConvertTo-SecureString '{}' -AsPlainText -Force
+$cred = New-Object System.Management.Automation.PSCredential('{}', $secpass)
+Invoke-Command -ComputerName {} -Credential $cred -ScriptBlock {{
+    Get-ScheduledTask | Select-Object TaskName,TaskPath,State,LastRunTime,NextRunTime
+}} | Out-GridView -Title 'Task Scheduler - {}'
+"#,
+        password.replace("'", "''"),
+        username,
+        server,
+        server
+    );
+
+    let result = Command::new("powershell.exe")
+        .args([
+            "-NoProfile",
+            "-WindowStyle", "Normal",
+            "-Command",
+            &ps_script,
+        ])
+        .spawn();
+
+    match result {
+        Ok(_) => {
+            logger::log_info(&format!(
+                "launch_task_scheduler: Successfully launched Task Scheduler for '{}'",
+                server
+            ));
+            Ok(())
+        }
+        Err(e) => {
+            let error_msg = format!("Failed to launch Task Scheduler: {}", e);
+            logger::log_error(&format!("launch_task_scheduler: {}", error_msg));
+            Err(error_msg)
+        }
+    }
+}
+
+#[cfg(not(windows))]
+#[tauri::command]
+async fn launch_task_scheduler(_server: String) -> Result<(), String> {
+    Err("Task Scheduler is only supported on Windows".to_string())
+}
+
+#[cfg(windows)]
+#[tauri::command]
+async fn launch_computer_management(server: String) -> Result<(), String> {
+    let server = server.trim();
+
+    if server.is_empty() {
+        return Err("Server name is required".to_string());
+    }
+
+    logger::log_info(&format!(
+        "launch_computer_management: Launching Computer Management for server '{}'",
+        server
+    ));
+
+    // Retrieve stored credentials
+    let (credentials, _) = resolve_host_credentials(server).await?;
+    let username = credentials.username().as_str();
+    let password = credentials.password().as_str();
+    
+    // Build PowerShell script that creates credential and executes remotely
+    let ps_script = format!(
+        r#"$secpass = ConvertTo-SecureString '{}' -AsPlainText -Force
+$cred = New-Object System.Management.Automation.PSCredential('{}', $secpass)
+Invoke-Command -ComputerName {} -Credential $cred -ScriptBlock {{
+    Get-ComputerInfo | Select-Object CsName,OsName,OsVersion,OsArchitecture,CsProcessors,@{{N='TotalMemoryGB';E={{[math]::Round($_.CsTotalPhysicalMemory/1GB,2)}}}},OsLastBootUpTime
+}} | Out-GridView -Title 'Computer Information - {}'
+"#,
+        password.replace("'", "''"),
+        username,
+        server,
+        server
+    );
+
+    let result = Command::new("powershell.exe")
+        .args([
+            "-NoProfile",
+            "-WindowStyle", "Normal",
+            "-Command",
+            &ps_script,
+        ])
+        .spawn();
+
+    match result {
+        Ok(_) => {
+            logger::log_info(&format!(
+                "launch_computer_management: Successfully launched Computer Management for '{}'",
+                server
+            ));
+            Ok(())
+        }
+        Err(e) => {
+            let error_msg = format!("Failed to launch Computer Management: {}", e);
+            logger::log_error(&format!("launch_computer_management: {}", error_msg));
+            Err(error_msg)
+        }
+    }
+}
+
+#[cfg(not(windows))]
+#[tauri::command]
+async fn launch_computer_management(_server: String) -> Result<(), String> {
+    Err("Computer Management is only supported on Windows".to_string())
 }
 
 /// Launch regedit.exe for remote registry connection
@@ -6682,7 +6815,9 @@ fn main() {
             launch_rdp,
             launch_ssh,
             open_explorer_share,
-            launch_mmc_snapin,
+            launch_event_viewer,
+            launch_task_scheduler,
+            launch_computer_management,
             launch_remote_registry,
             remote_restart,
             remote_shutdown,
