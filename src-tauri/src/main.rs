@@ -6586,6 +6586,78 @@ fn check_is_elevated() -> bool {
     true
 }
 
+/// Relaunch the current process with Administrator elevation via UAC.
+///
+/// Uses the Windows ShellExecute "runas" verb to trigger a UAC prompt.
+/// If the user accepts, a new elevated instance starts and this one should exit.
+/// If the user declines UAC, returns an error.
+#[cfg(windows)]
+#[tauri::command]
+async fn relaunch_elevated(app: tauri::AppHandle) -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
+
+    let exe_path = std::env::current_exe()
+        .map_err(|e| format!("Failed to resolve executable path: {}", e))?;
+
+    logger::log_info(&format!(
+        "relaunch_elevated: Requesting elevation for '{}'",
+        exe_path.display()
+    ));
+
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+    // Use PowerShell Start-Process -Verb RunAs to trigger UAC
+    let exe_str = exe_path.to_string_lossy().to_string();
+    let result = Command::new("powershell.exe")
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            &format!(
+                "Start-Process -FilePath '{}' -Verb RunAs",
+                exe_str.replace("'", "''")
+            ),
+        ])
+        .creation_flags(CREATE_NO_WINDOW)
+        .spawn();
+
+    match result {
+        Ok(mut child) => {
+            // Wait briefly for UAC to complete
+            match child.wait() {
+                Ok(status) if status.success() => {
+                    logger::log_info("relaunch_elevated: Elevated process started, exiting current instance");
+                    // Give the new instance a moment to start
+                    std::thread::sleep(std::time::Duration::from_millis(500));
+                    app.exit(0);
+                    Ok(())
+                }
+                Ok(status) => {
+                    let msg = format!("UAC elevation was declined or failed (exit code: {:?})", status.code());
+                    logger::log_info(&format!("relaunch_elevated: {}", msg));
+                    Err(msg)
+                }
+                Err(e) => {
+                    let msg = format!("Failed to wait for elevation process: {}", e);
+                    logger::log_error(&format!("relaunch_elevated: {}", msg));
+                    Err(msg)
+                }
+            }
+        }
+        Err(e) => {
+            let msg = format!("Failed to request elevation: {}", e);
+            logger::log_error(&format!("relaunch_elevated: {}", msg));
+            Err(msg)
+        }
+    }
+}
+
+#[cfg(not(windows))]
+#[tauri::command]
+async fn relaunch_elevated(_app: tauri::AppHandle) -> Result<(), String> {
+    Err("Elevation is only supported on Windows".to_string())
+}
+
 fn main() {
     logger::init_dev_logger();
     logger::log_info("QuickProbe starting");
@@ -6826,7 +6898,8 @@ fn main() {
             open_logs_folder,
             check_for_update,
             download_and_install_update,
-            check_is_elevated
+            check_is_elevated,
+            relaunch_elevated
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -2534,20 +2534,47 @@
                 initDetailsDialog();
                 initHostPreviewModal();
 
-                // Check for admin elevation and show warning banner if needed
+                // Check for admin elevation and offer to relaunch if needed
                 if (window.__TAURI__) {
                     try {
                         const isElevated = await window.__TAURI__.core.invoke('check_is_elevated');
                         if (!isElevated) {
+                            const alreadyDeclined = sessionStorage.getItem('qp_elevation_dismissed');
+                            if (!alreadyDeclined) {
+                                // Offer to relaunch with elevation
+                                const wantsElevation = await showConfirmDialog(
+                                    'QuickProbe is not running as Administrator.\n\nSome management features (MMC snap-ins, remote registry, C$ shares) require elevation to work without additional credential prompts.\n\nWould you like to restart as Administrator?',
+                                    {
+                                        title: 'Run as Administrator?',
+                                        okText: 'Restart as Admin',
+                                        okClass: 'btn-warning',
+                                        cancelText: 'Continue Without'
+                                    }
+                                );
+
+                                if (wantsElevation) {
+                                    try {
+                                        showInfo('Requesting Administrator elevation...');
+                                        await window.__TAURI__.core.invoke('relaunch_elevated');
+                                        // If we get here, the relaunch failed silently
+                                    } catch (elevErr) {
+                                        console.warn('Elevation request failed or was declined:', elevErr);
+                                        showError('Elevation was declined or failed. Continuing with limited functionality.');
+                                    }
+                                }
+
+                                // User declined or elevation failed — remember for this session
+                                sessionStorage.setItem('qp_elevation_dismissed', '1');
+                            }
+
+                            // Show the persistent warning banner
                             const banner = document.getElementById('elevation-banner');
-                            const dismissed = sessionStorage.getItem('qp_elevation_dismissed');
-                            if (banner && !dismissed) {
+                            if (banner) {
                                 banner.classList.remove('hidden');
                                 const dismissBtn = document.getElementById('elevation-banner-dismiss');
                                 if (dismissBtn) {
                                     dismissBtn.addEventListener('click', () => {
                                         banner.classList.add('hidden');
-                                        sessionStorage.setItem('qp_elevation_dismissed', '1');
                                     });
                                 }
                             }
