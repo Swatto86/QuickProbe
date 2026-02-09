@@ -3015,8 +3015,6 @@ async fn open_explorer_share(_server: String) -> Result<(), String> {
 #[cfg(windows)]
 #[tauri::command]
 async fn launch_mmc_snapin(server: String, snapin: String) -> Result<(), String> {
-    use std::os::windows::process::CommandExt;
-
     let server = server.trim();
     let snapin = snapin.trim().to_lowercase();
 
@@ -3032,8 +3030,6 @@ async fn launch_mmc_snapin(server: String, snapin: String) -> Result<(), String>
         snapin, server
     ));
 
-    const CREATE_NO_WINDOW: u32 = 0x08000000;
-
     // Build arguments for MMC based on snap-in type
     let mmc_args = match snapin.as_str() {
         "eventvwr.msc" => {
@@ -3046,16 +3042,10 @@ async fn launch_mmc_snapin(server: String, snapin: String) -> Result<(), String>
         }
     };
 
-    // Use runas verb to trigger UAC elevation
-    // This is more reliable than nested PowerShell scripts
-    let ps_script = format!(
-        "Start-Process -FilePath 'mmc.exe' -ArgumentList '{}' -Verb RunAs",
-        mmc_args.replace("'", "''")
-    );
-
-    let result = Command::new("powershell.exe")
-        .args(["-NoProfile", "-NonInteractive", "-Command", &ps_script])
-        .creation_flags(CREATE_NO_WINDOW)
+    // Launch MMC directly without PowerShell - MMC will self-elevate when needed
+    // This avoids cache issues from elevated PowerShell contexts
+    let result = Command::new("mmc.exe")
+        .arg(&mmc_args)
         .spawn();
 
     match result {
