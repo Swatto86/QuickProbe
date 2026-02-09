@@ -3031,22 +3031,23 @@ async fn launch_mmc_snapin(server: String, snapin: String) -> Result<(), String>
     ));
 
     // Build arguments for MMC based on snap-in type
-    let mmc_args = match snapin.as_str() {
+    // Arguments must be passed separately, not as a single string
+    let result = match snapin.as_str() {
         "eventvwr.msc" => {
             // Event Viewer requires /computer: with colon (not equals)
-            format!("{} /computer:{}", snapin, server)
+            Command::new("mmc.exe")
+                .arg(&snapin)
+                .arg(format!("/computer:{}", server))
+                .spawn()
         }
         _ => {
             // Most snap-ins use /computer=\\server format
-            format!("{} /computer=\\\\{}", snapin, server)
+            Command::new("mmc.exe")
+                .arg(&snapin)
+                .arg(format!("/computer=\\\\{}", server))
+                .spawn()
         }
     };
-
-    // Launch MMC directly without PowerShell - MMC will self-elevate when needed
-    // This avoids cache issues from elevated PowerShell contexts
-    let result = Command::new("mmc.exe")
-        .arg(&mmc_args)
-        .spawn();
 
     match result {
         Ok(_) => {
