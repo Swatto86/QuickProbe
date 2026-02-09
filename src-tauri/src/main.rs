@@ -3057,8 +3057,15 @@ async fn launch_mmc_snapin(server: String, snapin: String) -> Result<(), String>
     const CREATE_NO_WINDOW: u32 = 0x08000000;
 
     // Build PowerShell command with proper ArgumentList array syntax
-    // Use @() to create a PowerShell array for proper argument passing to mmc.exe
+    // Different snap-ins require different parameter formats
     let ps_script = match snapin.as_str() {
+        "eventvwr.msc" => {
+            // Event Viewer requires /computer: with colon (not equals)
+            format!(
+                "Start-Process -FilePath 'mmc.exe' -ArgumentList @('{}','/computer:{}') -Verb RunAs",
+                snapin, server
+            )
+        }
         "taskschd.msc" => {
             // Task Scheduler connects to remote using /computer parameter
             format!(
