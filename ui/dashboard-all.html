@@ -5742,7 +5742,6 @@
                                     <li class="menu-title text-xs opacity-80 font-bold">System Tools</li>
                                     <li><a class="comp-mgmt-btn whitespace-nowrap">🖥️ Computer Management</a></li>
                                     <li><a class="event-viewer-btn whitespace-nowrap">📋 Event Viewer</a></li>
-                                    <li><a class="disk-mgmt-btn whitespace-nowrap">💿 Disk Management</a></li>
                                     <li><a class="task-scheduler-btn whitespace-nowrap">📅 Task Scheduler</a></li>
                                     <li><a class="remote-registry-btn whitespace-nowrap">🗝️ Remote Registry</a></li>
                                     <li><a class="stop-remote-registry-btn whitespace-nowrap">🗝️ Stop Remote Registry</a></li>
@@ -5859,16 +5858,6 @@
                         e.stopPropagation();
                         e.preventDefault();
                         launchMmcSnapin(server.name, 'eventvwr.msc', 'Event Viewer');
-                    });
-                }
-
-                // Disk Management button handler
-                const diskMgmtBtn = card.querySelector('.disk-mgmt-btn');
-                if (diskMgmtBtn) {
-                    diskMgmtBtn.addEventListener('click', (e) => {
-                        e.stopPropagation();
-                        e.preventDefault();
-                        launchMmcSnapin(server.name, 'diskmgmt.msc', 'Disk Management');
                     });
                 }
 
@@ -6174,7 +6163,6 @@
                                 <li class="menu-title text-xs opacity-80 font-bold">System Tools</li>
                                 <li><a class="comp-mgmt-btn whitespace-nowrap">🖥️ Computer Management</a></li>
                                 <li><a class="event-viewer-btn whitespace-nowrap">📋 Event Viewer</a></li>
-                                <li><a class="disk-mgmt-btn whitespace-nowrap">💿 Disk Management</a></li>
                                 <li><a class="task-scheduler-btn whitespace-nowrap">📅 Task Scheduler</a></li>
                                 <li><a class="remote-registry-btn whitespace-nowrap">🗝️ Remote Registry</a></li>
                                 <li><a class="stop-remote-registry-btn whitespace-nowrap">🗝️ Stop Remote Registry</a></li>
@@ -6291,16 +6279,6 @@
                     e.stopPropagation();
                     e.preventDefault();
                     launchMmcSnapin(server.name, 'eventvwr.msc', 'Event Viewer');
-                });
-            }
-
-            // Disk Management button handler
-            const diskMgmtBtn = card.querySelector('.disk-mgmt-btn');
-            if (diskMgmtBtn) {
-                diskMgmtBtn.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    e.preventDefault();
-                    launchMmcSnapin(server.name, 'diskmgmt.msc', 'Disk Management');
                 });
             }
 
@@ -7205,6 +7183,10 @@
                     serviceName: 'RemoteRegistry',
                     action: 'start'
                 });
+
+                // Wait for service to fully initialize (3 seconds)
+                showInfo(`Waiting for RemoteRegistry service to initialize...`);
+                await new Promise(resolve => setTimeout(resolve, 3000));
 
                 // Then launch regedit
                 await invoke('launch_remote_registry', { server: serverName });

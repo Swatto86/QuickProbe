@@ -3056,30 +3056,24 @@ async fn launch_mmc_snapin(server: String, snapin: String) -> Result<(), String>
 
     const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-    // Different snap-ins use different command-line arguments for remote targeting
-    // PowerShell ArgumentList needs args as comma-separated quoted strings
-    let ps_args = match snapin.as_str() {
+    // Build PowerShell command with proper ArgumentList array syntax
+    // Use @() to create a PowerShell array for proper argument passing to mmc.exe
+    let ps_script = match snapin.as_str() {
         "taskschd.msc" => {
-            // Task Scheduler uses /s instead of /computer=
-            format!("'{}','/s','{}'", snapin, server)
-        }
-        "compmgmt.msc" | "eventvwr.msc" | "diskmgmt.msc" => {
-            // Most snap-ins use /computer=\\server format
-            format!("'{}','/computer=\\\\{}'", snapin, server)
+            // Task Scheduler connects to remote using /computer parameter
+            format!(
+                "Start-Process -FilePath 'mmc.exe' -ArgumentList @('{}','/computer=\\\\{}') -Verb RunAs",
+                snapin, server
+            )
         }
         _ => {
-            // Default: try /computer= format
-            format!("'{}','/computer={}'", snapin, server)
+            // Most snap-ins use /computer=\\server format
+            format!(
+                "Start-Process -FilePath 'mmc.exe' -ArgumentList @('{}','/computer=\\\\{}') -Verb RunAs",
+                snapin, server
+            )
         }
     };
-
-    // Use PowerShell Start-Process with -Verb RunAs to trigger UAC elevation if needed
-    // This allows the user to approve elevation rather than getting a silent failure
-    // ArgumentList must be comma-separated quoted values for proper parsing
-    let ps_script = format!(
-        "Start-Process -FilePath 'mmc.exe' -ArgumentList {} -Verb RunAs",
-        ps_args
-    );
 
     let result = Command::new("powershell.exe")
         .args(["-NoProfile", "-NonInteractive", "-Command", &ps_script])
@@ -3130,37 +3124,54 @@ async fn launch_remote_registry(server: String) -> Result<(), String> {
 
     const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-    // Test connectivity to remote registry first
-    let test_result = Command::new("reg.exe")
-        .args(["query", &format!("\\\\{}\\HKLM", server)])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output();
+    // Test connectivity to remote registry with retries
+    // Service may take a moment to fully start after being enabled
+    let mut last_error = String::new();
+    let max_retries = 3;
+    let mut connected = false;
 
-    match test_result {
-        Ok(output) if !output.status.success() => {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            logger::log_warn(&format!(
-                "launch_remote_registry: Registry connectivity test failed for '{}': {}",
-                server, stderr
-            ));
-            return Err(format!(
-                "Cannot connect to remote registry on {}. Ensure RemoteRegistry service is running and you have permissions.",
-                server
-            ));
+    for attempt in 1..=max_retries {
+        let test_result = Command::new("reg.exe")
+            .args(["query", &format!("\\\\{}\\HKLM", server)])
+            .creation_flags(CREATE_NO_WINDOW)
+            .output();
+
+        match test_result {
+            Ok(output) if output.status.success() => {
+                logger::log_debug(&format!(
+                    "launch_remote_registry: Registry connectivity test successful for '{}' (attempt {})",
+                    server, attempt
+                ));
+                connected = true;
+                break;
+            }
+            Ok(output) => {
+                last_error = String::from_utf8_lossy(&output.stderr).to_string();
+                logger::log_warn(&format!(
+                    "launch_remote_registry: Registry connectivity test failed for '{}' (attempt {}): {}",
+                    server, attempt, last_error
+                ));
+            }
+            Err(e) => {
+                last_error = e.to_string();
+                logger::log_warn(&format!(
+                    "launch_remote_registry: Could not test registry connectivity (attempt {}): {}",
+                    attempt, e
+                ));
+            }
         }
-        Err(e) => {
-            logger::log_warn(&format!(
-                "launch_remote_registry: Could not test registry connectivity: {}",
-                e
-            ));
-            return Err(format!("Failed to test registry connectivity: {}", e));
+
+        // Wait before retrying (except on last attempt)
+        if attempt < max_retries {
+            std::thread::sleep(std::time::Duration::from_millis(1000));
         }
-        _ => {
-            logger::log_debug(&format!(
-                "launch_remote_registry: Registry connectivity test successful for '{}'",
-                server
-            ));
-        }
+    }
+
+    if !connected {
+        return Err(format!(
+            "Cannot connect to remote registry on {}. Ensure RemoteRegistry service is running and you have permissions. Last error: {}",
+            server, last_error.trim()
+        ));
     }
 
     // Launch regedit and use PowerShell to automate the connection to remote registry
