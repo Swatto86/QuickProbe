@@ -205,7 +205,7 @@
         </div>
 
         <!-- Notifications -->
-        <div id="notification-stack" class="toast toast-top toast-end"></div>
+        <div id="notification-stack" class="toast toast-top toast-end z-50"></div>
 
         <!-- Summary Stats -->
         <div id="summary-stats" class="hidden grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-6">
@@ -5727,24 +5727,30 @@
                             <button class="refresh-btn">🔄 Refresh</button>
                             <div class="dropdown dropdown-end">
                                 <button tabindex="0" class="manage-btn">⚙️ Actions</button>
-                                <ul tabindex="0" class="dropdown-content menu bg-base-200 rounded-box z-50 w-64 p-2 shadow-lg border border-base-300">
-                                    <li><a class="rdp-creds-btn">🔑 Set Host Credentials</a></li>
-                                    ${!isLinux ? '<li><a class="explore-share-btn">📁 Explore C$</a></li>' : ''}
-                                    <li><a class="manage-services-btn">${isLinux ? '🐧 Manage Services (systemd)' : '🔧 Manage Services'}</a></li>
-                                    <li><a class="manage-processes-btn">${isLinux ? '🐧 Manage Processes (top)' : '📊 Manage Processes'}</a></li>
-                                    <li><a class="remote-shell-btn">${isLinux ? '🐧 Remote SSH' : '💻 Remote PowerShell'}</a></li>
+                                <ul tabindex="0" class="dropdown-content menu bg-base-200 rounded-box z-50 min-w-[28rem] p-2 shadow-lg border border-base-300">
+                                    <li><a class="rdp-creds-btn whitespace-nowrap">🔑 Set Host Credentials</a></li>
+                                    <li><hr class="my-2 border-t-2 border-base-300 opacity-80"></li>
+                                    <li class="menu-title text-xs opacity-80 font-bold">Remote Access</li>
+                                    <li><a class="remote-shell-btn whitespace-nowrap">${isLinux ? '🐧 Remote SSH' : '💻 Remote PowerShell'}</a></li>
+                                    ${!isLinux ? '<li><a class="explore-share-btn whitespace-nowrap">📁 Explore C$</a></li>' : ''}
+                                    <li><hr class="my-2 border-t-2 border-base-300 opacity-80"></li>
+                                    <li class="menu-title text-xs opacity-80 font-bold">Management</li>
+                                    <li><a class="manage-services-btn whitespace-nowrap">${isLinux ? '🐧 Manage Services (systemd)' : '🔧 Manage Services'}</a></li>
+                                    <li><a class="manage-processes-btn whitespace-nowrap">${isLinux ? '🐧 Manage Processes (top)' : '📊 Manage Processes'}</a></li>
                                     ${!isLinux ? `
-                                    <li class="menu-title text-xs opacity-60">System Tools</li>
-                                    <li><a class="comp-mgmt-btn">🖥️ Computer Management</a></li>
-                                    <li><a class="event-viewer-btn">📋 Event Viewer</a></li>
-                                    <li><a class="disk-mgmt-btn">💿 Disk Management</a></li>
-                                    <li><a class="task-scheduler-btn">📅 Task Scheduler</a></li>
-                                    <li><a class="remote-registry-btn">🗝️ Remote Registry</a></li>
-                                    <li><a class="stop-remote-registry-btn">🗝️ Stop Remote Registry</a></li>
+                                    <li><hr class="my-2 border-t-2 border-base-300 opacity-80"></li>
+                                    <li class="menu-title text-xs opacity-80 font-bold">System Tools</li>
+                                    <li><a class="comp-mgmt-btn whitespace-nowrap">🖥️ Computer Management</a></li>
+                                    <li><a class="event-viewer-btn whitespace-nowrap">📋 Event Viewer</a></li>
+                                    <li><a class="disk-mgmt-btn whitespace-nowrap">💿 Disk Management</a></li>
+                                    <li><a class="task-scheduler-btn whitespace-nowrap">📅 Task Scheduler</a></li>
+                                    <li><a class="remote-registry-btn whitespace-nowrap">🗝️ Remote Registry</a></li>
+                                    <li><a class="stop-remote-registry-btn whitespace-nowrap">🗝️ Stop Remote Registry</a></li>
                                     ` : ''}
-                                    <li class="menu-title text-xs opacity-60">Remote Actions</li>
-                                    <li><a class="restart-server-btn">🔄 Restart Server</a></li>
-                                    <li><a class="shutdown-server-btn">⏹️ Shutdown Server</a></li>
+                                    <li><hr class="my-2 border-t-2 border-base-300 opacity-80"></li>
+                                    <li class="menu-title text-xs opacity-80 font-bold">Power Management</li>
+                                    <li><a class="restart-server-btn whitespace-nowrap">🔄 Restart Server</a></li>
+                                    <li><a class="shutdown-server-btn whitespace-nowrap">⏹️ Shutdown Server</a></li>
                                 </ul>
                             </div>
                         </div>
@@ -5826,9 +5832,9 @@
                         e.preventDefault();
                         try {
                             await window.__TAURI__.core.invoke('open_explorer_share', { server: server.name });
-                            showNotification(`Opening Explorer to \\\\${server.name}\\C$`, 'success');
+                            showInfo(`Opening Explorer to \\\\${server.name}\\C$`);
                         } catch (err) {
-                            showNotification(`Failed to open Explorer: ${err}`, 'error');
+                            showError(`Failed to open Explorer: ${err}`);
                             logDebug(`open_explorer_share failed for ${server.name}: ${err}`);
                         }
                     });
@@ -6153,24 +6159,30 @@
                         <button class="refresh-btn">🔄 Refresh</button>
                         <div class="dropdown dropdown-end">
                             <button tabindex="0" class="manage-btn">⚙️ Actions</button>
-                            <ul tabindex="0" class="dropdown-content menu bg-base-200 rounded-box z-50 w-64 p-2 shadow-lg border border-base-300">
-                                <li><a class="rdp-creds-btn">🔑 Set Host Credentials</a></li>
-                                ${!isLinux ? '<li><a class="explore-share-btn">📁 Explore C$</a></li>' : ''}
-                                <li><a class="manage-services-btn">${isLinux ? '🐧 Manage Services (systemd)' : '🔧 Manage Services'}</a></li>
-                                <li><a class="manage-processes-btn">${isLinux ? '🐧 Manage Processes (top)' : '📊 Manage Processes'}</a></li>
-                                <li><a class="remote-shell-btn">${isLinux ? '🐧 Remote SSH' : '💻 Remote PowerShell'}</a></li>
+                            <ul tabindex="0" class="dropdown-content menu bg-base-200 rounded-box z-50 min-w-[28rem] p-2 shadow-lg border border-base-300">
+                                <li><a class="rdp-creds-btn whitespace-nowrap">🔑 Set Host Credentials</a></li>
+                                <li><hr class="my-2 border-t-2 border-base-300 opacity-80"></li>
+                                <li class="menu-title text-xs opacity-80 font-bold">Remote Access</li>
+                                <li><a class="remote-shell-btn whitespace-nowrap">${isLinux ? '🐧 Remote SSH' : '💻 Remote PowerShell'}</a></li>
+                                ${!isLinux ? '<li><a class="explore-share-btn whitespace-nowrap">📁 Explore C$</a></li>' : ''}
+                                <li><hr class="my-2 border-t-2 border-base-300 opacity-80"></li>
+                                <li class="menu-title text-xs opacity-80 font-bold">Management</li>
+                                <li><a class="manage-services-btn whitespace-nowrap">${isLinux ? '🐧 Manage Services (systemd)' : '🔧 Manage Services'}</a></li>
+                                <li><a class="manage-processes-btn whitespace-nowrap">${isLinux ? '🐧 Manage Processes (top)' : '📊 Manage Processes'}</a></li>
                                 ${!isLinux ? `
-                                <li class="menu-title text-xs opacity-60">System Tools</li>
-                                <li><a class="comp-mgmt-btn">🖥️ Computer Management</a></li>
-                                <li><a class="event-viewer-btn">📋 Event Viewer</a></li>
-                                <li><a class="disk-mgmt-btn">💿 Disk Management</a></li>
-                                <li><a class="task-scheduler-btn">📅 Task Scheduler</a></li>
-                                <li><a class="remote-registry-btn">🗝️ Remote Registry</a></li>
-                                <li><a class="stop-remote-registry-btn">🗝️ Stop Remote Registry</a></li>
+                                <li><hr class="my-2 border-t-2 border-base-300 opacity-80"></li>
+                                <li class="menu-title text-xs opacity-80 font-bold">System Tools</li>
+                                <li><a class="comp-mgmt-btn whitespace-nowrap">🖥️ Computer Management</a></li>
+                                <li><a class="event-viewer-btn whitespace-nowrap">📋 Event Viewer</a></li>
+                                <li><a class="disk-mgmt-btn whitespace-nowrap">💿 Disk Management</a></li>
+                                <li><a class="task-scheduler-btn whitespace-nowrap">📅 Task Scheduler</a></li>
+                                <li><a class="remote-registry-btn whitespace-nowrap">🗝️ Remote Registry</a></li>
+                                <li><a class="stop-remote-registry-btn whitespace-nowrap">🗝️ Stop Remote Registry</a></li>
                                 ` : ''}
-                                <li class="menu-title text-xs opacity-60">Remote Actions</li>
-                                <li><a class="restart-server-btn">🔄 Restart Server</a></li>
-                                <li><a class="shutdown-server-btn">⏹️ Shutdown Server</a></li>
+                                <li><hr class="my-2 border-t-2 border-base-300 opacity-80"></li>
+                                <li class="menu-title text-xs opacity-80 font-bold">Power Management</li>
+                                <li><a class="restart-server-btn whitespace-nowrap">🔄 Restart Server</a></li>
+                                <li><a class="shutdown-server-btn whitespace-nowrap">⏹️ Shutdown Server</a></li>
                             </ul>
                         </div>
                     </div>
@@ -6218,9 +6230,9 @@
                     e.preventDefault();
                     try {
                         await window.__TAURI__.core.invoke('open_explorer_share', { server: server.name });
-                        showNotification(`Opening Explorer to \\\\${server.name}\\C$`, 'success');
+                        showInfo(`Opening Explorer to \\\\${server.name}\\C$`);
                     } catch (err) {
-                        showNotification(`Failed to open Explorer: ${err}`, 'error');
+                        showError(`Failed to open Explorer: ${err}`);
                         logDebug(`open_explorer_share failed for ${server.name}: ${err}`);
                     }
                 });
@@ -7160,7 +7172,7 @@
                     server: serverName,
                     snapin
                 });
-                showNotification(`Opening ${label} for ${serverName}`, 'success');
+                showInfo(`Opening ${label} for ${serverName}`);
             } catch (err) {
                 const message = err?.toString?.() ? err.toString() : `${err}`;
                 showError(`Failed to launch ${label}: ${message}`);
@@ -7197,7 +7209,7 @@
                 // Then launch regedit
                 await invoke('launch_remote_registry', { server: serverName });
 
-                showInfo(`Remote Registry service started on ${serverName}. Use File → Connect Network Registry in regedit to connect. Remember to stop the service when done.`);
+                showInfo(`Connected to Remote Registry on ${serverName}`);
             } catch (err) {
                 const message = err?.toString?.() ? err.toString() : `${err}`;
                 showError(`Failed to start Remote Registry: ${message}`);
@@ -7237,7 +7249,7 @@
                     serviceName: 'RemoteRegistry',
                     action: 'stop'
                 });
-                showNotification(`Remote Registry service stopped on ${serverName}`, 'success');
+                showInfo(`Remote Registry service stopped on ${serverName}`);
             } catch (err) {
                 const message = err?.toString?.() ? err.toString() : `${err}`;
                 showError(`Failed to stop Remote Registry: ${message}`);
@@ -7366,7 +7378,7 @@
             try {
                 const { invoke } = window.__TAURI__.core;
                 await invoke('remote_restart', { serverName });
-                showNotification(`Restart initiated for ${serverName}`, 'success');
+                showInfo(`Restart initiated for ${serverName}`);
 
                 // Trigger a refresh after a short delay to update status
                 setTimeout(() => triggerQuickProbe(serverName, 'restart-check'), 3000);
@@ -7418,7 +7430,7 @@
             try {
                 const { invoke } = window.__TAURI__.core;
                 await invoke('remote_shutdown', { serverName });
-                showNotification(`Shutdown initiated for ${serverName}`, 'success');
+                showInfo(`Shutdown initiated for ${serverName}`);
 
                 // Trigger a refresh after a short delay to update status
                 setTimeout(() => triggerQuickProbe(serverName, 'shutdown-check'), 3000);
