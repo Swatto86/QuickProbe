@@ -16,6 +16,8 @@ QuickProbe lets you check server health, launch RDP sessions, and manage your fl
 - **Real-time health probes** — CPU, memory, disk, uptime, services, and more
 - **Dual-OS support** — Windows (WinRM) and Linux (SSH) targets
 - **One-click RDP launch** — Double-click to connect with stored credentials
+- **Remote management** — Manage services, processes, PowerShell/SSH, and file shares
+- **File share access** — Open Windows Explorer to C$ (or other shares) with stored credentials
 - **Active Directory scanning** — Discover servers via LDAP
 - **Secure credentials** — Stored in Windows Credential Manager (DPAPI)
 - **Local-first** — SQLite database, no cloud required
@@ -28,6 +30,44 @@ QuickProbe lets you check server health, launch RDP sessions, and manage your fl
 3. **Login** — enter your domain credentials (`DOMAIN\username`)
 4. **Add servers** — manually or scan your Active Directory
 5. **Monitor** — click Refresh and double-click any card to RDP
+
+## Using QuickProbe
+
+### Dashboard Controls
+
+Each server card has two action rows:
+
+**Row 1:**
+- **🔄 Refresh** — Update health data for this server
+- **⚙️ Actions** — Dropdown menu with management options
+
+**Row 2:**
+- **✏️ Edit** — Modify server settings (notes, services, group)
+
+### Actions Menu
+
+The Actions dropdown provides quick access to:
+
+**For Windows servers:**
+- **🔑 Set Host Credentials** — Store per-host credentials (overrides global login)
+- **📁 Explore C$** — Open Windows Explorer to the administrative C$ share
+- **🔧 Manage Services** — View, start, stop, and restart services
+- **📊 Manage Processes** — Monitor CPU usage, kill processes
+- **💻 Remote PowerShell** — Interactive PowerShell session
+
+**For Linux servers:**
+- **🔑 Set Host Credentials** — Store per-host SSH credentials
+- **🐧 Manage Services (systemd)** — View and control systemd services
+- **🐧 Manage Processes (top)** — Monitor processes
+- **🐧 Remote SSH** — Open SSH terminal session
+
+### Credential Hierarchy
+
+QuickProbe uses credentials in this order:
+1. **Host-specific credentials** (set via Actions → Set Host Credentials)
+2. **Global credentials** (from initial login)
+
+This allows you to use different accounts for specific servers while maintaining a default credential set.
 
 ## Requirements
 
