@@ -3112,7 +3112,69 @@ async fn launch_event_viewer(_server: String) -> Result<(), String> {
 #[cfg(windows)]
 #[tauri::command]
 async fn launch_task_scheduler(server: String) -> Result<(), String> {
-    launch_mmc_snapin(server.trim(), "taskschd.msc", "Task Scheduler").await
+    use std::os::windows::process::CommandExt;
+
+    let server = server.trim();
+    if server.is_empty() {
+        return Err("Server name is required".to_string());
+    }
+
+    logger::log_info(&format!(
+        "launch_task_scheduler: Launching Task Scheduler for server '{}'",
+        server
+    ));
+
+    // Retrieve stored credentials and cache them via cmdkey
+    let (credentials, _) = resolve_host_credentials(server).await?;
+    let username = credentials.username().as_str();
+    let password = credentials.password().as_str();
+
+    let (domain, user) = split_domain_username(username);
+    let full_username = if !domain.is_empty() {
+        format!("{}\\{}", domain, user)
+    } else {
+        user.to_string()
+    };
+
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+    // Cache credentials for the remote server
+    let _ = Command::new("cmdkey")
+        .args([
+            &format!("/add:{}", server),
+            &format!("/user:{}", full_username),
+            &format!("/pass:{}", password),
+        ])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output();
+
+    // taskschd.msc does not support /computer: switch directly.
+    // Use PowerShell to launch MMC and connect Task Scheduler to the remote host.
+    let ps_script = format!(
+        r#"$msc = 'taskschd.msc /s /computer:{}'
+Start-Process mmc.exe -ArgumentList $msc"#,
+        server
+    );
+
+    let result = Command::new("powershell.exe")
+        .args(["-NoProfile", "-NonInteractive", "-Command", &ps_script])
+        .creation_flags(CREATE_NO_WINDOW)
+        .spawn();
+
+    match result {
+        Ok(_) => {
+            logger::log_info(&format!(
+                "launch_task_scheduler: Successfully launched Task Scheduler for '{}'",
+                server
+            ));
+            Ok(())
+        }
+        Err(e) => {
+            let error_msg = format!("Failed to launch Task Scheduler: {}", e);
+            logger::log_error(&format!("launch_task_scheduler: {}", error_msg));
+            Err(error_msg)
+        }
+    }
 }
 
 #[cfg(not(windows))]
@@ -3124,7 +3186,63 @@ async fn launch_task_scheduler(_server: String) -> Result<(), String> {
 #[cfg(windows)]
 #[tauri::command]
 async fn launch_computer_management(server: String) -> Result<(), String> {
-    launch_mmc_snapin(server.trim(), "compmgmt.msc", "Computer Management").await
+    use std::os::windows::process::CommandExt;
+
+    let server = server.trim();
+    if server.is_empty() {
+        return Err("Server name is required".to_string());
+    }
+
+    logger::log_info(&format!(
+        "launch_computer_management: Launching Computer Management for server '{}'",
+        server
+    ));
+
+    // Retrieve stored credentials and cache them via cmdkey
+    let (credentials, _) = resolve_host_credentials(server).await?;
+    let username = credentials.username().as_str();
+    let password = credentials.password().as_str();
+
+    let (domain, user) = split_domain_username(username);
+    let full_username = if !domain.is_empty() {
+        format!("{}\\{}", domain, user)
+    } else {
+        user.to_string()
+    };
+
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+    // Cache credentials for the remote server
+    let _ = Command::new("cmdkey")
+        .args([
+            &format!("/add:{}", server),
+            &format!("/user:{}", full_username),
+            &format!("/pass:{}", password),
+        ])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output();
+
+    // compmgmt.msc is a composite snap-in. Launch it directly without going
+    // through the generic launch_mmc_snapin helper to avoid DCOM issues.
+    // The /computer: switch targets all sub-snap-ins to the remote host.
+    let result = Command::new("mmc.exe")
+        .args(["compmgmt.msc", &format!("/computer:{}", server)])
+        .spawn();
+
+    match result {
+        Ok(_) => {
+            logger::log_info(&format!(
+                "launch_computer_management: Successfully launched Computer Management for '{}'",
+                server
+            ));
+            Ok(())
+        }
+        Err(e) => {
+            let error_msg = format!("Failed to launch Computer Management: {}", e);
+            logger::log_error(&format!("launch_computer_management: {}", error_msg));
+            Err(error_msg)
+        }
+    }
 }
 
 #[cfg(not(windows))]

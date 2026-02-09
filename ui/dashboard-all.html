@@ -960,6 +960,7 @@
         const quickProbeMeta = new Map();
         const fullRefreshMeta = new Map();
         const hostStatuses = new Map();
+        let qpIsElevated = true; // Assume elevated until checked; updated on init
 
         // Circuit breaker pattern: track consecutive failures and back off probes for failing servers
         const serverHealthState = new Map(); // { consecutiveFailures, lastFailureTime, circuitState, nextProbeTime }
@@ -2538,6 +2539,7 @@
                 if (window.__TAURI__) {
                     try {
                         const isElevated = await window.__TAURI__.core.invoke('check_is_elevated');
+                        qpIsElevated = isElevated;
                         if (!isElevated) {
                             const alreadyDeclined = sessionStorage.getItem('qp_elevation_dismissed');
                             if (!alreadyDeclined) {
@@ -5804,12 +5806,12 @@
                                     <li><a class="manage-processes-btn whitespace-nowrap">${isLinux ? '🐧 Manage Processes (top)' : '📊 Manage Processes'}</a></li>
                                     ${!isLinux ? `
                                     <li><hr class="my-2 border-t-2 border-base-300 opacity-80"></li>
-                                    <li class="menu-title text-xs opacity-80 font-bold">System Tools</li>
-                                    <li><a class="comp-mgmt-btn whitespace-nowrap">🖥️ Computer Management</a></li>
-                                    <li><a class="event-viewer-btn whitespace-nowrap">📋 Event Viewer</a></li>
-                                    <li><a class="task-scheduler-btn whitespace-nowrap">📅 Task Scheduler</a></li>
-                                    <li><a class="remote-registry-btn whitespace-nowrap">🗝️ Remote Registry</a></li>
-                                    <li><a class="stop-remote-registry-btn whitespace-nowrap">🗝️ Stop Remote Registry</a></li>
+                                    <li class="menu-title text-xs opacity-80 font-bold">System Tools${!qpIsElevated ? ' (requires Admin)' : ''}</li>
+                                    <li class="${!qpIsElevated ? 'disabled opacity-40 pointer-events-none' : ''}"><a class="comp-mgmt-btn whitespace-nowrap">🖥️ Computer Management</a></li>
+                                    <li class="${!qpIsElevated ? 'disabled opacity-40 pointer-events-none' : ''}"><a class="event-viewer-btn whitespace-nowrap">📋 Event Viewer</a></li>
+                                    <li class="${!qpIsElevated ? 'disabled opacity-40 pointer-events-none' : ''}"><a class="task-scheduler-btn whitespace-nowrap">📅 Task Scheduler</a></li>
+                                    <li class="${!qpIsElevated ? 'disabled opacity-40 pointer-events-none' : ''}"><a class="remote-registry-btn whitespace-nowrap">🗝️ Remote Registry</a></li>
+                                    <li class="${!qpIsElevated ? 'disabled opacity-40 pointer-events-none' : ''}"><a class="stop-remote-registry-btn whitespace-nowrap">🗝️ Stop Remote Registry</a></li>
                                     ` : ''}
                                     <li><hr class="my-2 border-t-2 border-base-300 opacity-80"></li>
                                     <li class="menu-title text-xs opacity-80 font-bold">Power Management</li>
@@ -6225,12 +6227,12 @@
                                 <li><a class="manage-processes-btn whitespace-nowrap">${isLinux ? '🐧 Manage Processes (top)' : '📊 Manage Processes'}</a></li>
                                 ${!isLinux ? `
                                 <li><hr class="my-2 border-t-2 border-base-300 opacity-80"></li>
-                                <li class="menu-title text-xs opacity-80 font-bold">System Tools</li>
-                                <li><a class="comp-mgmt-btn whitespace-nowrap">🖥️ Computer Management</a></li>
-                                <li><a class="event-viewer-btn whitespace-nowrap">📋 Event Viewer</a></li>
-                                <li><a class="task-scheduler-btn whitespace-nowrap">📅 Task Scheduler</a></li>
-                                <li><a class="remote-registry-btn whitespace-nowrap">🗝️ Remote Registry</a></li>
-                                <li><a class="stop-remote-registry-btn whitespace-nowrap">🗝️ Stop Remote Registry</a></li>
+                                <li class="menu-title text-xs opacity-80 font-bold">System Tools${!qpIsElevated ? ' (requires Admin)' : ''}</li>
+                                <li class="${!qpIsElevated ? 'disabled opacity-40 pointer-events-none' : ''}"><a class="comp-mgmt-btn whitespace-nowrap">🖥️ Computer Management</a></li>
+                                <li class="${!qpIsElevated ? 'disabled opacity-40 pointer-events-none' : ''}"><a class="event-viewer-btn whitespace-nowrap">📋 Event Viewer</a></li>
+                                <li class="${!qpIsElevated ? 'disabled opacity-40 pointer-events-none' : ''}"><a class="task-scheduler-btn whitespace-nowrap">📅 Task Scheduler</a></li>
+                                <li class="${!qpIsElevated ? 'disabled opacity-40 pointer-events-none' : ''}"><a class="remote-registry-btn whitespace-nowrap">🗝️ Remote Registry</a></li>
+                                <li class="${!qpIsElevated ? 'disabled opacity-40 pointer-events-none' : ''}"><a class="stop-remote-registry-btn whitespace-nowrap">🗝️ Stop Remote Registry</a></li>
                                 ` : ''}
                                 <li><hr class="my-2 border-t-2 border-base-300 opacity-80"></li>
                                 <li class="menu-title text-xs opacity-80 font-bold">Power Management</li>
