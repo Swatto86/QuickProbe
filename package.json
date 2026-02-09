@@ -1,7 +1,7 @@
 {
   "name": "quickprobe",
   "version": "1.0.0",
-  "description": "Active Directory credential validation tool",
+  "description": "Windows and Linux server monitoring and management tool",
   "scripts": {
     "tauri": "tauri",
     "dev": "npm run build:css && tauri dev",
