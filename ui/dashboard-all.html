@@ -5691,6 +5691,7 @@
                                     <li><a class="manage-services-btn">${isLinux ? '🐧 Manage Services (systemd)' : '🔧 Manage Services'}</a></li>
                                     <li><a class="manage-processes-btn">${isLinux ? '🐧 Manage Processes (top)' : '📊 Manage Processes'}</a></li>
                                     <li><a class="remote-shell-btn">${isLinux ? '🐧 Remote SSH' : '💻 Remote PowerShell'}</a></li>
+                                    ${!isLinux ? '<li><a class="explore-share-btn">📁 Explore C$</a></li>' : ''}
                                 </ul>
                             </div>
                         </div>
@@ -5756,6 +5757,22 @@
                             openRemoteSshModal(server.name);
                         } else {
                             openRemotePowerShellModal(server.name);
+                        }
+                    });
+                }
+
+                // Explore C$ share button handler (Windows only)
+                const exploreShareBtn = card.querySelector('.explore-share-btn');
+                if (exploreShareBtn) {
+                    exploreShareBtn.addEventListener('click', async (e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        try {
+                            await window.__TAURI__.core.invoke('open_explorer_share', { server: server.name });
+                            showNotification(`Opening Explorer to \\\\${server.name}\\C$`, 'success');
+                        } catch (err) {
+                            showNotification(`Failed to open Explorer: ${err}`, 'error');
+                            logDebug(`open_explorer_share failed for ${server.name}: ${err}`);
                         }
                     });
                 }
