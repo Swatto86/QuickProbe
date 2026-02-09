@@ -6011,18 +6011,19 @@
                 <div class="qp-card-actions">
                     <div class="qp-card-actions-row">
                         <button class="refresh-btn">🔄 Refresh</button>
-                        <button class="edit-host-btn">✏️ Edit</button>
-                        <button class="rdp-creds-btn">🔑 Host Creds</button>
-                    </div>
-                    <div class="qp-card-actions-row">
                         <div class="dropdown dropdown-end">
-                            <button tabindex="0" class="manage-btn">⚙️ Manage</button>
+                            <button tabindex="0" class="manage-btn">⚙️ Actions</button>
                             <ul tabindex="0" class="dropdown-content menu bg-base-200 rounded-box z-50 w-52 p-2 shadow-lg border border-base-300">
+                                <li><a class="rdp-creds-btn">🔑 Set Host Credentials</a></li>
+                                ${!isLinux ? '<li><a class="explore-share-btn">📁 Explore C$</a></li>' : ''}
                                 <li><a class="manage-services-btn">${isLinux ? '🐧 Manage Services (systemd)' : '🔧 Manage Services'}</a></li>
                                 <li><a class="manage-processes-btn">${isLinux ? '🐧 Manage Processes (top)' : '📊 Manage Processes'}</a></li>
                                 <li><a class="remote-shell-btn">${isLinux ? '🐧 Remote SSH' : '💻 Remote PowerShell'}</a></li>
                             </ul>
                         </div>
+                    </div>
+                    <div class="qp-card-actions-row">
+                        <button class="edit-host-btn">✏️ Edit</button>
                     </div>
                 </div>
                 </div>
@@ -6052,7 +6053,24 @@
             if (credsBtn) {
                 credsBtn.addEventListener('click', (e) => {
                     e.stopPropagation();
+                    e.preventDefault();
                     setHostCredentials(server.name);
+                });
+            }
+
+            // Explore C$ share button handler (Windows only)
+            const exploreShareBtn = card.querySelector('.explore-share-btn');
+            if (exploreShareBtn) {
+                exploreShareBtn.addEventListener('click', async (e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    try {
+                        await window.__TAURI__.core.invoke('open_explorer_share', { server: server.name });
+                        showNotification(`Opening Explorer to \\\\${server.name}\\C$`, 'success');
+                    } catch (err) {
+                        showNotification(`Failed to open Explorer: ${err}`, 'error');
+                        logDebug(`open_explorer_share failed for ${server.name}: ${err}`);
+                    }
                 });
             }
 
