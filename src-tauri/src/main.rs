@@ -2919,6 +2919,97 @@ async fn launch_ssh(server: String) -> Result<(), String> {
     result
 }
 
+/// Open Windows Explorer to the C$ administrative share on a remote host
+///
+/// Uses credentials (host-specific or global) to mount the share and open Explorer.
+#[cfg(windows)]
+#[tauri::command]
+async fn open_explorer_share(server: String) -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
+
+    let server = server.trim();
+    if server.is_empty() {
+        return Err("Server name is required".to_string());
+    }
+
+    logger::log_info(&format!(
+        "open_explorer_share: Opening Explorer to \\\\{}\\C$",
+        server
+    ));
+
+    // Get credentials for the host
+    let (creds, used_profile) = resolve_host_credentials(server).await?;
+    let username = creds.username().as_str();
+    let password = creds.password().as_str();
+
+    logger::log_debug(&format!(
+        "open_explorer_share: Using credentials from profile '{}' for '{}'",
+        used_profile, server
+    ));
+
+    // Parse username into domain\user format if needed
+    let (domain, user) = split_domain_username(username);
+    let full_username = if !domain.is_empty() {
+        format!("{}\\{}", domain, user)
+    } else {
+        user.to_string()
+    };
+
+    let unc_path = format!("\\\\{}\\C$", server);
+
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+    // Use net use to mount the share with credentials
+    // /delete first to clear any existing connection
+    let _ = Command::new("net")
+        .args(&["use", &unc_path, "/delete", "/y"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output();
+
+    // Now mount with credentials
+    let output = Command::new("net")
+        .args(&[
+            "use",
+            &unc_path,
+            password,
+            &format!("/user:{}", full_username),
+        ])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .map_err(|e| format!("Failed to execute net use: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        logger::log_error(&format!(
+            "open_explorer_share: net use failed for '{}': {}",
+            server, stderr
+        ));
+        return Err(format!(
+            "Failed to connect to share: {}. Please verify credentials and network access.",
+            stderr.trim()
+        ));
+    }
+
+    // Open Explorer to the mounted share
+    Command::new("explorer.exe")
+        .arg(&unc_path)
+        .spawn()
+        .map_err(|e| format!("Failed to launch Explorer: {}", e))?;
+
+    logger::log_info(&format!(
+        "open_explorer_share: Successfully opened Explorer to '{}'",
+        unc_path
+    ));
+
+    Ok(())
+}
+
+#[cfg(not(windows))]
+#[tauri::command]
+async fn open_explorer_share(_server: String) -> Result<(), String> {
+    Err("Explorer share opening is only supported on Windows".to_string())
+}
+
 /// Save notes for a server in hosts.csv
 ///
 /// Updates or creates the notes field for a specific server.
@@ -6275,6 +6366,7 @@ fn main() {
             save_rdp_credentials,
             launch_rdp,
             launch_ssh,
+            open_explorer_share,
             check_autostart,
             toggle_autostart,
             get_start_hidden_setting,

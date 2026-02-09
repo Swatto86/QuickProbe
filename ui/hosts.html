@@ -1181,6 +1181,7 @@
                 const box = host.box ? `<span class="badge badge-primary">${escapeHtml(host.box)}</span>` : '';
                 const osPill = `<span class="badge badge-ghost">${escapeHtml(host.os || 'Windows')}</span>`;
                 const statusBadge = getHostStatusBadge(host.name);
+                const isLinux = (host.os || 'Windows').toLowerCase() === 'linux';
 
                 const cardBody = document.createElement('div');
                 cardBody.className = 'card-body';
@@ -1197,22 +1198,69 @@
                     `;
 
                 const actions = document.createElement('div');
-                actions.className = 'card-actions justify-end mt-2';
+                actions.className = 'card-actions justify-end mt-2 flex-wrap gap-2';
+
+                // Check button
                 const checkBtn = document.createElement('button');
                 checkBtn.className = 'btn btn-ghost btn-sm';
                 checkBtn.textContent = 'Check';
                 checkBtn.onclick = () => checkHostStatus(host.name, true);
+
+                // Edit button
                 const editBtn = document.createElement('button');
                 editBtn.className = 'btn btn-ghost btn-sm';
                 editBtn.textContent = 'Edit';
                 editBtn.onclick = () => startEdit(host.name);
+
+                // Delete button
                 const deleteBtn = document.createElement('button');
                 deleteBtn.className = 'btn btn-ghost btn-sm text-error';
                 deleteBtn.textContent = 'Delete';
                 deleteBtn.onclick = () => deleteHost(host.name);
+
+                // Manage dropdown
+                const manageDiv = document.createElement('div');
+                manageDiv.className = 'dropdown dropdown-end';
+
+                const manageButton = document.createElement('button');
+                manageButton.className = 'btn btn-ghost btn-sm';
+                manageButton.setAttribute('tabindex', '0');
+                manageButton.textContent = '⚙️ Manage';
+
+                const manageMenu = document.createElement('ul');
+                manageMenu.className = 'dropdown-content menu bg-base-200 rounded-box z-50 w-52 p-2 shadow-lg border border-base-300';
+                manageMenu.setAttribute('tabindex', '0');
+
+                // Only show Explore option for Windows hosts
+                if (!isLinux) {
+                    const exploreItem = document.createElement('li');
+                    const exploreLink = document.createElement('a');
+                    exploreLink.className = 'explore-share-link';
+                    exploreLink.textContent = '📁 Explore C$';
+                    exploreLink.href = '#';
+                    exploreLink.onclick = async (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        try {
+                            await window.__TAURI__.core.invoke('open_explorer_share', { server: host.name });
+                            showBanner('success', `Opening Explorer to \\\\${host.name}\\C$`);
+                        } catch (err) {
+                            showBanner('error', `Failed to open Explorer: ${err}`);
+                            logDebug(`open_explorer_share failed for ${host.name}: ${err}`);
+                        }
+                    };
+                    exploreItem.appendChild(exploreLink);
+                    manageMenu.appendChild(exploreItem);
+                }
+
+                manageDiv.appendChild(manageButton);
+                manageDiv.appendChild(manageMenu);
+
                 actions.appendChild(checkBtn);
                 actions.appendChild(editBtn);
                 actions.appendChild(deleteBtn);
+                actions.appendChild(manageDiv);
+
                 cardBody.appendChild(actions);
                 card.appendChild(cardBody);
                 list.appendChild(card);
