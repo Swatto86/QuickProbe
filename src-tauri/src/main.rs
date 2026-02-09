@@ -3032,55 +3032,26 @@ async fn launch_mmc_snapin(server: String, snapin: String) -> Result<(), String>
         snapin, server
     ));
 
-    // Clear MMC cache to prevent showing previous console during load
-    // MMC stores cached console state in %APPDATA%\Microsoft\MMC\
-    if let Ok(appdata) = std::env::var("APPDATA") {
-        let mmc_cache_path = PathBuf::from(appdata).join("Microsoft").join("MMC");
-        if mmc_cache_path.exists() {
-            logger::log_debug(&format!(
-                "launch_mmc_snapin: Clearing MMC cache at {:?}",
-                mmc_cache_path
-            ));
-            // Delete all files in the MMC cache directory (but not subdirectories)
-            if let Ok(entries) = std::fs::read_dir(&mmc_cache_path) {
-                for entry in entries.flatten() {
-                    if let Ok(metadata) = entry.metadata() {
-                        if metadata.is_file() {
-                            let _ = std::fs::remove_file(entry.path());
-                        }
-                    }
-                }
-            }
-        }
-    }
-
     const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-    // Build PowerShell command with proper ArgumentList array syntax
-    // Different snap-ins require different parameter formats
-    let ps_script = match snapin.as_str() {
+    // Build arguments for MMC based on snap-in type
+    let mmc_args = match snapin.as_str() {
         "eventvwr.msc" => {
             // Event Viewer requires /computer: with colon (not equals)
-            format!(
-                "Start-Process -FilePath 'mmc.exe' -ArgumentList @('{}','/computer:{}') -Verb RunAs",
-                snapin, server
-            )
-        }
-        "taskschd.msc" => {
-            // Task Scheduler connects to remote using /computer parameter
-            format!(
-                "Start-Process -FilePath 'mmc.exe' -ArgumentList @('{}','/computer=\\\\{}') -Verb RunAs",
-                snapin, server
-            )
+            format!("{} /computer:{}", snapin, server)
         }
         _ => {
             // Most snap-ins use /computer=\\server format
-            format!(
-                "Start-Process -FilePath 'mmc.exe' -ArgumentList @('{}','/computer=\\\\{}') -Verb RunAs",
-                snapin, server
-            )
+            format!("{} /computer=\\\\{}", snapin, server)
         }
     };
+
+    // Use runas verb to trigger UAC elevation
+    // This is more reliable than nested PowerShell scripts
+    let ps_script = format!(
+        "Start-Process -FilePath 'mmc.exe' -ArgumentList '{}' -Verb RunAs",
+        mmc_args.replace("'", "''")
+    );
 
     let result = Command::new("powershell.exe")
         .args(["-NoProfile", "-NonInteractive", "-Command", &ps_script])
