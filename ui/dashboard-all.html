@@ -58,6 +58,31 @@
             border-radius: 4px;
             padding: 0 2px;
         }
+
+        /* Countdown dialog animations */
+        @keyframes slideInRight {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+
+        @keyframes slideOutRight {
+            from {
+                transform: translateX(0);
+                opacity: 1;
+            }
+
+            to {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+        }
     </style>
 </head>
 
@@ -1002,16 +1027,35 @@
 
         function showConfirmDialog(message, options = {}) {
             return new Promise((resolve) => {
-                const modal = document.getElementById('confirm-modal');
-                const titleEl = document.getElementById('confirm-modal-title');
-                const messageEl = document.getElementById('confirm-modal-message');
-                const okBtn = document.getElementById('confirm-modal-ok');
-                const cancelBtn = document.getElementById('confirm-modal-cancel');
-                const backdrop = document.getElementById('confirm-modal-backdrop');
+                let modal = document.getElementById('confirm-modal');
+                let titleEl = document.getElementById('confirm-modal-title');
+                let messageEl = document.getElementById('confirm-modal-message');
+                let okBtn = document.getElementById('confirm-modal-ok');
+                let cancelBtn = document.getElementById('confirm-modal-cancel');
+                let backdrop = document.getElementById('confirm-modal-backdrop');
 
+                // If modal doesn't exist, create a themed one dynamically (should never happen)
                 if (!modal) {
-                    resolve(window.confirm(message));
-                    return;
+                    modal = document.createElement('dialog');
+                    modal.id = 'confirm-modal-dynamic';
+                    modal.className = 'modal modal-bottom sm:modal-middle';
+                    modal.innerHTML = `
+                        <div class="modal-box">
+                            <h3 id="confirm-modal-title-dynamic" class="font-bold text-lg">Confirm</h3>
+                            <p id="confirm-modal-message-dynamic" class="py-4 text-base-content/80 whitespace-pre-wrap"></p>
+                            <div class="modal-action">
+                                <button type="button" id="confirm-modal-cancel-dynamic" class="btn">Cancel</button>
+                                <button type="button" id="confirm-modal-ok-dynamic" class="btn btn-primary">OK</button>
+                            </div>
+                        </div>
+                        <div class="modal-backdrop bg-black/50" id="confirm-modal-backdrop-dynamic"></div>
+                    `;
+                    document.body.appendChild(modal);
+                    titleEl = document.getElementById('confirm-modal-title-dynamic');
+                    messageEl = document.getElementById('confirm-modal-message-dynamic');
+                    okBtn = document.getElementById('confirm-modal-ok-dynamic');
+                    cancelBtn = document.getElementById('confirm-modal-cancel-dynamic');
+                    backdrop = document.getElementById('confirm-modal-backdrop-dynamic');
                 }
 
                 let resolved = false;
@@ -5683,12 +5727,24 @@
                             <button class="refresh-btn">🔄 Refresh</button>
                             <div class="dropdown dropdown-end">
                                 <button tabindex="0" class="manage-btn">⚙️ Actions</button>
-                                <ul tabindex="0" class="dropdown-content menu bg-base-200 rounded-box z-50 w-52 p-2 shadow-lg border border-base-300">
+                                <ul tabindex="0" class="dropdown-content menu bg-base-200 rounded-box z-50 w-64 p-2 shadow-lg border border-base-300">
                                     <li><a class="rdp-creds-btn">🔑 Set Host Credentials</a></li>
                                     ${!isLinux ? '<li><a class="explore-share-btn">📁 Explore C$</a></li>' : ''}
                                     <li><a class="manage-services-btn">${isLinux ? '🐧 Manage Services (systemd)' : '🔧 Manage Services'}</a></li>
                                     <li><a class="manage-processes-btn">${isLinux ? '🐧 Manage Processes (top)' : '📊 Manage Processes'}</a></li>
                                     <li><a class="remote-shell-btn">${isLinux ? '🐧 Remote SSH' : '💻 Remote PowerShell'}</a></li>
+                                    ${!isLinux ? `
+                                    <li class="menu-title text-xs opacity-60">System Tools</li>
+                                    <li><a class="comp-mgmt-btn">🖥️ Computer Management</a></li>
+                                    <li><a class="event-viewer-btn">📋 Event Viewer</a></li>
+                                    <li><a class="disk-mgmt-btn">💿 Disk Management</a></li>
+                                    <li><a class="task-scheduler-btn">📅 Task Scheduler</a></li>
+                                    <li><a class="remote-registry-btn">🗝️ Remote Registry</a></li>
+                                    <li><a class="stop-remote-registry-btn">🗝️ Stop Remote Registry</a></li>
+                                    ` : ''}
+                                    <li class="menu-title text-xs opacity-60">Remote Actions</li>
+                                    <li><a class="restart-server-btn">🔄 Restart Server</a></li>
+                                    <li><a class="shutdown-server-btn">⏹️ Shutdown Server</a></li>
                                 </ul>
                             </div>
                         </div>
@@ -5775,6 +5831,90 @@
                             showNotification(`Failed to open Explorer: ${err}`, 'error');
                             logDebug(`open_explorer_share failed for ${server.name}: ${err}`);
                         }
+                    });
+                }
+
+                // === System Tools (Windows only) ===
+
+                // Computer Management button handler
+                const compMgmtBtn = card.querySelector('.comp-mgmt-btn');
+                if (compMgmtBtn) {
+                    compMgmtBtn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        launchMmcSnapin(server.name, 'compmgmt.msc', 'Computer Management');
+                    });
+                }
+
+                // Event Viewer button handler
+                const eventViewerBtn = card.querySelector('.event-viewer-btn');
+                if (eventViewerBtn) {
+                    eventViewerBtn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        launchMmcSnapin(server.name, 'eventvwr.msc', 'Event Viewer');
+                    });
+                }
+
+                // Disk Management button handler
+                const diskMgmtBtn = card.querySelector('.disk-mgmt-btn');
+                if (diskMgmtBtn) {
+                    diskMgmtBtn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        launchMmcSnapin(server.name, 'diskmgmt.msc', 'Disk Management');
+                    });
+                }
+
+                // Task Scheduler button handler
+                const taskSchedulerBtn = card.querySelector('.task-scheduler-btn');
+                if (taskSchedulerBtn) {
+                    taskSchedulerBtn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        launchMmcSnapin(server.name, 'taskschd.msc', 'Task Scheduler');
+                    });
+                }
+
+                // Remote Registry button handler
+                const remoteRegistryBtn = card.querySelector('.remote-registry-btn');
+                if (remoteRegistryBtn) {
+                    remoteRegistryBtn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        startRemoteRegistry(server.name);
+                    });
+                }
+
+                // Stop Remote Registry button handler
+                const stopRemoteRegistryBtn = card.querySelector('.stop-remote-registry-btn');
+                if (stopRemoteRegistryBtn) {
+                    stopRemoteRegistryBtn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        stopRemoteRegistry(server.name);
+                    });
+                }
+
+                // === Remote Actions (Cross-platform) ===
+
+                // Restart Server button handler
+                const restartServerBtn = card.querySelector('.restart-server-btn');
+                if (restartServerBtn) {
+                    restartServerBtn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        restartServer(server.name);
+                    });
+                }
+
+                // Shutdown Server button handler
+                const shutdownServerBtn = card.querySelector('.shutdown-server-btn');
+                if (shutdownServerBtn) {
+                    shutdownServerBtn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        shutdownServer(server.name);
                     });
                 }
 
@@ -6013,12 +6153,24 @@
                         <button class="refresh-btn">🔄 Refresh</button>
                         <div class="dropdown dropdown-end">
                             <button tabindex="0" class="manage-btn">⚙️ Actions</button>
-                            <ul tabindex="0" class="dropdown-content menu bg-base-200 rounded-box z-50 w-52 p-2 shadow-lg border border-base-300">
+                            <ul tabindex="0" class="dropdown-content menu bg-base-200 rounded-box z-50 w-64 p-2 shadow-lg border border-base-300">
                                 <li><a class="rdp-creds-btn">🔑 Set Host Credentials</a></li>
                                 ${!isLinux ? '<li><a class="explore-share-btn">📁 Explore C$</a></li>' : ''}
                                 <li><a class="manage-services-btn">${isLinux ? '🐧 Manage Services (systemd)' : '🔧 Manage Services'}</a></li>
                                 <li><a class="manage-processes-btn">${isLinux ? '🐧 Manage Processes (top)' : '📊 Manage Processes'}</a></li>
                                 <li><a class="remote-shell-btn">${isLinux ? '🐧 Remote SSH' : '💻 Remote PowerShell'}</a></li>
+                                ${!isLinux ? `
+                                <li class="menu-title text-xs opacity-60">System Tools</li>
+                                <li><a class="comp-mgmt-btn">🖥️ Computer Management</a></li>
+                                <li><a class="event-viewer-btn">📋 Event Viewer</a></li>
+                                <li><a class="disk-mgmt-btn">💿 Disk Management</a></li>
+                                <li><a class="task-scheduler-btn">📅 Task Scheduler</a></li>
+                                <li><a class="remote-registry-btn">🗝️ Remote Registry</a></li>
+                                <li><a class="stop-remote-registry-btn">🗝️ Stop Remote Registry</a></li>
+                                ` : ''}
+                                <li class="menu-title text-xs opacity-60">Remote Actions</li>
+                                <li><a class="restart-server-btn">🔄 Restart Server</a></li>
+                                <li><a class="shutdown-server-btn">⏹️ Shutdown Server</a></li>
                             </ul>
                         </div>
                     </div>
@@ -6105,6 +6257,90 @@
                     } else {
                         openRemotePowerShellModal(server.name);
                     }
+                });
+            }
+
+            // === System Tools (Windows only) ===
+
+            // Computer Management button handler
+            const compMgmtBtn = card.querySelector('.comp-mgmt-btn');
+            if (compMgmtBtn) {
+                compMgmtBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    launchMmcSnapin(server.name, 'compmgmt.msc', 'Computer Management');
+                });
+            }
+
+            // Event Viewer button handler
+            const eventViewerBtn = card.querySelector('.event-viewer-btn');
+            if (eventViewerBtn) {
+                eventViewerBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    launchMmcSnapin(server.name, 'eventvwr.msc', 'Event Viewer');
+                });
+            }
+
+            // Disk Management button handler
+            const diskMgmtBtn = card.querySelector('.disk-mgmt-btn');
+            if (diskMgmtBtn) {
+                diskMgmtBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    launchMmcSnapin(server.name, 'diskmgmt.msc', 'Disk Management');
+                });
+            }
+
+            // Task Scheduler button handler
+            const taskSchedulerBtn = card.querySelector('.task-scheduler-btn');
+            if (taskSchedulerBtn) {
+                taskSchedulerBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    launchMmcSnapin(server.name, 'taskschd.msc', 'Task Scheduler');
+                });
+            }
+
+            // Remote Registry button handler
+            const remoteRegistryBtn = card.querySelector('.remote-registry-btn');
+            if (remoteRegistryBtn) {
+                remoteRegistryBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    startRemoteRegistry(server.name);
+                });
+            }
+
+            // Stop Remote Registry button handler
+            const stopRemoteRegistryBtn = card.querySelector('.stop-remote-registry-btn');
+            if (stopRemoteRegistryBtn) {
+                stopRemoteRegistryBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    stopRemoteRegistry(server.name);
+                });
+            }
+
+            // === Remote Actions (Cross-platform) ===
+
+            // Restart Server button handler
+            const restartServerBtn = card.querySelector('.restart-server-btn');
+            if (restartServerBtn) {
+                restartServerBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    restartServer(server.name);
+                });
+            }
+
+            // Shutdown Server button handler
+            const shutdownServerBtn = card.querySelector('.shutdown-server-btn');
+            if (shutdownServerBtn) {
+                shutdownServerBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    shutdownServer(server.name);
                 });
             }
 
@@ -6898,6 +7134,298 @@
             } catch (err) {
                 showError(`Failed to save host credentials: ${err}`);
                 return false;
+            }
+        }
+
+        // ===== MMC Snap-in Launcher =====
+        /**
+         * Launch an MMC snap-in targeting a remote server
+         * @param {string} serverName - The target server name
+         * @param {string} snapin - The MMC snap-in name (e.g., "compmgmt.msc")
+         * @param {string} label - User-friendly label for notifications
+         */
+        async function launchMmcSnapin(serverName, snapin, label) {
+            if (!serverName || !snapin) {
+                showError('Server name and snap-in are required');
+                return;
+            }
+            if (!window.__TAURI__) {
+                showError('Tauri API not available');
+                return;
+            }
+
+            try {
+                const { invoke } = window.__TAURI__.core;
+                await invoke('launch_mmc_snapin', {
+                    server: serverName,
+                    snapin
+                });
+                showNotification(`Opening ${label} for ${serverName}`, 'success');
+            } catch (err) {
+                const message = err?.toString?.() ? err.toString() : `${err}`;
+                showError(`Failed to launch ${label}: ${message}`);
+                logDebug(`launch_mmc_snapin failed for ${serverName} (${snapin}): ${message}`);
+            }
+        }
+
+        // ===== Remote Registry Management =====
+        /**
+         * Start the RemoteRegistry service and launch regedit for remote connection
+         * @param {string} serverName - The target server name
+         */
+        async function startRemoteRegistry(serverName) {
+            if (!serverName) {
+                showError('Server name is required');
+                return;
+            }
+            if (!window.__TAURI__) {
+                showError('Tauri API not available');
+                return;
+            }
+
+            try {
+                const { invoke } = window.__TAURI__.core;
+
+                // First, start the RemoteRegistry service
+                showInfo(`Starting Remote Registry service on ${serverName}...`);
+                await invoke('control_service', {
+                    serverName: serverName,
+                    serviceName: 'RemoteRegistry',
+                    action: 'start'
+                });
+
+                // Then launch regedit
+                await invoke('launch_remote_registry', { server: serverName });
+
+                showInfo(`Remote Registry service started on ${serverName}. Use File → Connect Network Registry in regedit to connect. Remember to stop the service when done.`);
+            } catch (err) {
+                const message = err?.toString?.() ? err.toString() : `${err}`;
+                showError(`Failed to start Remote Registry: ${message}`);
+                logDebug(`startRemoteRegistry failed for ${serverName}: ${message}`);
+            }
+        }
+
+        /**
+         * Stop the RemoteRegistry service on a remote server
+         * @param {string} serverName - The target server name
+         */
+        async function stopRemoteRegistry(serverName) {
+            if (!serverName) {
+                showError('Server name is required');
+                return;
+            }
+            if (!window.__TAURI__) {
+                showError('Tauri API not available');
+                return;
+            }
+
+            const confirmed = await showConfirmDialog(
+                `Stop the Remote Registry service on ${serverName}?`,
+                {
+                    title: 'Confirm Stop Service',
+                    okText: 'Stop',
+                    okClass: 'btn-warning'
+                }
+            );
+
+            if (!confirmed) return;
+
+            try {
+                const { invoke } = window.__TAURI__.core;
+                await invoke('control_service', {
+                    serverName: serverName,
+                    serviceName: 'RemoteRegistry',
+                    action: 'stop'
+                });
+                showNotification(`Remote Registry service stopped on ${serverName}`, 'success');
+            } catch (err) {
+                const message = err?.toString?.() ? err.toString() : `${err}`;
+                showError(`Failed to stop Remote Registry: ${message}`);
+                logDebug(`stopRemoteRegistry failed for ${serverName}: ${message}`);
+            }
+        }
+
+        // ===== Remote Server Power Management =====
+
+        /**
+         * Show a countdown timer with cancel button before executing a critical action
+         * @param {string} message - Message to display during countdown
+         * @param {number} seconds - Countdown duration in seconds (default: 10)
+         * @returns {Promise<boolean>} - True if countdown completed, false if cancelled
+         */
+        async function showCountdownDialog(message, seconds = 10) {
+            return new Promise((resolve) => {
+                let timeLeft = seconds;
+                let cancelled = false;
+                let intervalId = null;
+
+                // Create countdown notification element
+                const container = document.createElement('div');
+                container.className = 'fixed top-4 right-4 z-[9999] bg-warning text-warning-content p-6 rounded-lg shadow-2xl border-2 border-warning-content/20 min-w-[400px]';
+                container.style.animation = 'slideInRight 0.3s ease-out';
+
+                const messageDiv = document.createElement('div');
+                messageDiv.className = 'font-bold text-lg mb-3';
+                messageDiv.textContent = message;
+
+                const countdownDiv = document.createElement('div');
+                countdownDiv.className = 'text-6xl font-mono text-center my-4';
+                countdownDiv.textContent = timeLeft;
+
+                const progressBar = document.createElement('div');
+                progressBar.className = 'w-full h-2 bg-warning-content/20 rounded-full overflow-hidden mb-4';
+                const progressFill = document.createElement('div');
+                progressFill.className = 'h-full bg-warning-content transition-all duration-1000 ease-linear';
+                progressFill.style.width = '100%';
+                progressBar.appendChild(progressFill);
+
+                const cancelBtn = document.createElement('button');
+                cancelBtn.className = 'btn btn-error btn-block btn-lg';
+                cancelBtn.textContent = '✖ CANCEL';
+                cancelBtn.onclick = () => {
+                    cancelled = true;
+                    if (intervalId) clearInterval(intervalId);
+                    container.style.animation = 'slideOutRight 0.3s ease-in';
+                    setTimeout(() => container.remove(), 300);
+                    resolve(false);
+                };
+
+                container.appendChild(messageDiv);
+                container.appendChild(countdownDiv);
+                container.appendChild(progressBar);
+                container.appendChild(cancelBtn);
+
+                document.body.appendChild(container);
+
+                // Update countdown every second
+                intervalId = setInterval(() => {
+                    if (cancelled) return;
+
+                    timeLeft--;
+                    countdownDiv.textContent = timeLeft;
+
+                    // Update progress bar
+                    const progress = (timeLeft / seconds) * 100;
+                    progressFill.style.width = `${progress}%`;
+
+                    // Change color in final 3 seconds
+                    if (timeLeft <= 3) {
+                        container.className = container.className.replace('bg-warning', 'bg-error');
+                        container.className = container.className.replace('text-warning-content', 'text-error-content');
+                        countdownDiv.className = countdownDiv.className + ' animate-pulse';
+                    }
+
+                    if (timeLeft <= 0) {
+                        clearInterval(intervalId);
+                        container.style.animation = 'slideOutRight 0.3s ease-in';
+                        setTimeout(() => container.remove(), 300);
+                        resolve(true);
+                    }
+                }, 1000);
+            });
+        }
+
+        /**
+         * Restart a remote server (Windows or Linux)
+         * @param {string} serverName - The target server name
+         */
+        async function restartServer(serverName) {
+            if (!serverName) {
+                showError('Server name is required');
+                return;
+            }
+            if (!window.__TAURI__) {
+                showError('Tauri API not available');
+                return;
+            }
+
+            // First confirmation dialog
+            const confirmed = await showConfirmDialog(
+                `Are you sure you want to restart ${serverName}? This will interrupt all active sessions and services.`,
+                {
+                    title: 'Confirm Remote Restart',
+                    okText: 'Proceed',
+                    okClass: 'btn-warning'
+                }
+            );
+
+            if (!confirmed) return;
+
+            // Show countdown timer with cancel option
+            const countdownCompleted = await showCountdownDialog(
+                `⏱️ Restarting ${serverName} in...`,
+                10
+            );
+
+            if (!countdownCompleted) {
+                showInfo('Restart cancelled');
+                return;
+            }
+
+            // Execute the restart command
+            try {
+                const { invoke } = window.__TAURI__.core;
+                await invoke('remote_restart', { serverName });
+                showNotification(`Restart initiated for ${serverName}`, 'success');
+
+                // Trigger a refresh after a short delay to update status
+                setTimeout(() => triggerQuickProbe(serverName, 'restart-check'), 3000);
+            } catch (err) {
+                const message = err?.toString?.() ? err.toString() : `${err}`;
+                showError(`Failed to restart ${serverName}: ${message}`);
+                logDebug(`remote_restart failed for ${serverName}: ${message}`);
+            }
+        }
+
+        /**
+         * Shutdown a remote server (Windows or Linux)
+         * @param {string} serverName - The target server name
+         */
+        async function shutdownServer(serverName) {
+            if (!serverName) {
+                showError('Server name is required');
+                return;
+            }
+            if (!window.__TAURI__) {
+                showError('Tauri API not available');
+                return;
+            }
+
+            // First confirmation dialog with severe warning
+            const confirmed = await showConfirmDialog(
+                `⚠️ WARNING: Are you sure you want to SHUT DOWN ${serverName}? The server will need to be physically or remotely powered on again. This will interrupt all active sessions and services.`,
+                {
+                    title: 'Confirm Remote Shutdown',
+                    okText: 'Proceed',
+                    okClass: 'btn-error'
+                }
+            );
+
+            if (!confirmed) return;
+
+            // Show countdown timer with cancel option
+            const countdownCompleted = await showCountdownDialog(
+                `⏱️ Shutting down ${serverName} in...`,
+                10
+            );
+
+            if (!countdownCompleted) {
+                showInfo('Shutdown cancelled');
+                return;
+            }
+
+            // Execute the shutdown command
+            try {
+                const { invoke } = window.__TAURI__.core;
+                await invoke('remote_shutdown', { serverName });
+                showNotification(`Shutdown initiated for ${serverName}`, 'success');
+
+                // Trigger a refresh after a short delay to update status
+                setTimeout(() => triggerQuickProbe(serverName, 'shutdown-check'), 3000);
+            } catch (err) {
+                const message = err?.toString?.() ? err.toString() : `${err}`;
+                showError(`Failed to shutdown ${serverName}: ${message}`);
+                logDebug(`remote_shutdown failed for ${serverName}: ${message}`);
             }
         }
 
