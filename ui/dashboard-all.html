@@ -137,21 +137,6 @@
         </header>
 
         <!-- Search -->
-        <!-- Elevation Warning Banner (shown when not running as admin) -->
-        <div id="elevation-banner" class="hidden alert alert-warning shadow-lg mb-4">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24"
-                stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-            </svg>
-            <div>
-                <span class="font-semibold">Limited functionality:</span> QuickProbe is not running as Administrator.
-                Some management features (MMC snap-ins, remote registry, C$ shares) may prompt for credentials or fail.
-                Run as Administrator for full access.
-            </div>
-            <button id="elevation-banner-dismiss" class="btn btn-ghost btn-sm" type="button" title="Dismiss">✕</button>
-        </div>
-
         <section class="card bg-base-200 shadow-lg mb-4">
             <div class="card-body p-4">
                 <div class="flex gap-2 items-center flex-wrap">
@@ -960,8 +945,6 @@
         const quickProbeMeta = new Map();
         const fullRefreshMeta = new Map();
         const hostStatuses = new Map();
-        let qpIsElevated = true; // Assume elevated until checked; updated on init
-
         // Circuit breaker pattern: track consecutive failures and back off probes for failing servers
         const serverHealthState = new Map(); // { consecutiveFailures, lastFailureTime, circuitState, nextProbeTime }
         const CIRCUIT_BREAKER_THRESHOLD = 3; // Open circuit after 3 consecutive failures
@@ -2534,57 +2517,6 @@
                 initErrorDialog();
                 initDetailsDialog();
                 initHostPreviewModal();
-
-                // Check for admin elevation and offer to relaunch if needed
-                if (window.__TAURI__) {
-                    try {
-                        const isElevated = await window.__TAURI__.core.invoke('check_is_elevated');
-                        qpIsElevated = isElevated;
-                        if (!isElevated) {
-                            const alreadyDeclined = sessionStorage.getItem('qp_elevation_dismissed');
-                            if (!alreadyDeclined) {
-                                // Offer to relaunch with elevation
-                                const wantsElevation = await showConfirmDialog(
-                                    'QuickProbe is not running as Administrator.\n\nSome management features (MMC snap-ins, remote registry, C$ shares) require elevation to work without additional credential prompts.\n\nWould you like to restart as Administrator?',
-                                    {
-                                        title: 'Run as Administrator?',
-                                        okText: 'Restart as Admin',
-                                        okClass: 'btn-warning',
-                                        cancelText: 'Continue Without'
-                                    }
-                                );
-
-                                if (wantsElevation) {
-                                    try {
-                                        showInfo('Requesting Administrator elevation...');
-                                        await window.__TAURI__.core.invoke('relaunch_elevated');
-                                        // If we get here, the relaunch failed silently
-                                    } catch (elevErr) {
-                                        console.warn('Elevation request failed or was declined:', elevErr);
-                                        showError('Elevation was declined or failed. Continuing with limited functionality.');
-                                    }
-                                }
-
-                                // User declined or elevation failed — remember for this session
-                                sessionStorage.setItem('qp_elevation_dismissed', '1');
-                            }
-
-                            // Show the persistent warning banner
-                            const banner = document.getElementById('elevation-banner');
-                            if (banner) {
-                                banner.classList.remove('hidden');
-                                const dismissBtn = document.getElementById('elevation-banner-dismiss');
-                                if (dismissBtn) {
-                                    dismissBtn.addEventListener('click', () => {
-                                        banner.classList.add('hidden');
-                                    });
-                                }
-                            }
-                        }
-                    } catch (e) {
-                        console.warn('Elevation check failed:', e);
-                    }
-                }
 
                 const hostsChanged = consumeHostsChangedFlag();
                 const cacheState = hydrateFromCache();
@@ -5806,10 +5738,10 @@
                                     <li><a class="manage-processes-btn whitespace-nowrap">${isLinux ? '🐧 Manage Processes (top)' : '📊 Manage Processes'}</a></li>
                                     ${!isLinux ? `
                                     <li><hr class="my-2 border-t-2 border-base-300 opacity-80"></li>
-                                    <li class="menu-title text-xs opacity-80 font-bold">System Tools${!qpIsElevated ? ' (requires Admin)' : ''}</li>
-                                    <li class="${!qpIsElevated ? 'disabled opacity-40 pointer-events-none' : ''}"><a class="task-scheduler-btn whitespace-nowrap">📅 Task Scheduler</a></li>
-                                    <li class="${!qpIsElevated ? 'disabled opacity-40 pointer-events-none' : ''}"><a class="remote-registry-btn whitespace-nowrap">🗝️ Remote Registry</a></li>
-                                    <li class="${!qpIsElevated ? 'disabled opacity-40 pointer-events-none' : ''}"><a class="stop-remote-registry-btn whitespace-nowrap">🗝️ Stop Remote Registry</a></li>
+                                    <li class="menu-title text-xs opacity-80 font-bold">System Tools</li>
+                                    <li><a class="task-scheduler-btn whitespace-nowrap">📅 Task Scheduler</a></li>
+                                    <li><a class="remote-registry-btn whitespace-nowrap">🗝️ Remote Registry</a></li>
+                                    <li><a class="stop-remote-registry-btn whitespace-nowrap">🗝️ Stop Remote Registry</a></li>
                                     ` : ''}
                                     <li><hr class="my-2 border-t-2 border-base-300 opacity-80"></li>
                                     <li class="menu-title text-xs opacity-80 font-bold">Power Management</li>
@@ -6205,10 +6137,10 @@
                                 <li><a class="manage-processes-btn whitespace-nowrap">${isLinux ? '🐧 Manage Processes (top)' : '📊 Manage Processes'}</a></li>
                                 ${!isLinux ? `
                                 <li><hr class="my-2 border-t-2 border-base-300 opacity-80"></li>
-                                <li class="menu-title text-xs opacity-80 font-bold">System Tools${!qpIsElevated ? ' (requires Admin)' : ''}</li>
-                                <li class="${!qpIsElevated ? 'disabled opacity-40 pointer-events-none' : ''}"><a class="task-scheduler-btn whitespace-nowrap">📅 Task Scheduler</a></li>
-                                <li class="${!qpIsElevated ? 'disabled opacity-40 pointer-events-none' : ''}"><a class="remote-registry-btn whitespace-nowrap">🗝️ Remote Registry</a></li>
-                                <li class="${!qpIsElevated ? 'disabled opacity-40 pointer-events-none' : ''}"><a class="stop-remote-registry-btn whitespace-nowrap">🗝️ Stop Remote Registry</a></li>
+                                <li class="menu-title text-xs opacity-80 font-bold">System Tools</li>
+                                <li><a class="task-scheduler-btn whitespace-nowrap">📅 Task Scheduler</a></li>
+                                <li><a class="remote-registry-btn whitespace-nowrap">🗝️ Remote Registry</a></li>
+                                <li><a class="stop-remote-registry-btn whitespace-nowrap">🗝️ Stop Remote Registry</a></li>
                                 ` : ''}
                                 <li><hr class="my-2 border-t-2 border-base-300 opacity-80"></li>
                                 <li class="menu-title text-xs opacity-80 font-bold">Power Management</li>

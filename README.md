@@ -79,30 +79,9 @@ This allows you to use different accounts for specific servers while maintaining
 | Component | Requirements |
 |-----------|-------------|
 | **Your PC** | Windows 10/11 or Server 2012 R2+ |
-| **Your PC** | Local Administrator rights for full management features (see below) |
 | **Windows targets** | WinRM enabled (`Enable-PSRemoting -Force`) |
 | **Linux targets** | SSH server on port 22 |
 | **Credentials** | Admin account for Windows, SSH user for Linux |
-
-### Administrator Elevation
-
-QuickProbe works without admin rights for core monitoring (health probes, service status, RDP launch). However, **local Administrator elevation** is required for full host management features:
-
-| Feature | Requires Admin? |
-|---------|----------------|
-| Health probes (CPU, memory, disk, services) | No |
-| RDP launch | No |
-| Remote PowerShell / SSH | No |
-| Manage Services (start/stop/restart) | No |
-| Manage Processes (view/kill) | No |
-| Computer Management (MMC) | **Yes** |
-| Event Viewer (MMC) | **Yes** |
-| Task Scheduler (MMC) | **Yes** |
-| Remote Registry | **Yes** |
-| Explore C$ share | **Yes** |
-| Restart / Shutdown server | No |
-
-When running without elevation, a warning banner appears on the dashboard indicating limited functionality. The MMC snap-in features use `cmdkey` to cache credentials locally, which requires admin rights to function correctly.
 
 ## What Does QuickProbe Collect?
 
