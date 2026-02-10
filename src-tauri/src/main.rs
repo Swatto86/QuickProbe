@@ -3007,97 +3007,15 @@ async fn open_explorer_share(_server: String) -> Result<(), String> {
     Err("Explorer share opening is only supported on Windows".to_string())
 }
 
-/// Launch an MMC snap-in targeting a remote server
-///
-// launch_mmc_snapin helper removed — was only used by Event Viewer which
-// requires DCOM firewall rules not enabled by default.
-
-// Event Viewer removed — eventvwr.msc /computer: requires DCOM firewall rules
-// ("Remote Event Log Management" + "COM+ Network Access") on the target server
-// that are not enabled by default.
-
-#[cfg(windows)]
-#[tauri::command]
-async fn launch_task_scheduler(server: String) -> Result<(), String> {
-    use std::os::windows::process::CommandExt;
-
-    let server = server.trim();
-    if server.is_empty() {
-        return Err("Server name is required".to_string());
-    }
-
-    logger::log_info(&format!(
-        "launch_task_scheduler: Launching Task Scheduler for server '{}'",
-        server
-    ));
-
-    // Retrieve stored credentials and cache them via cmdkey
-    let (credentials, _) = resolve_host_credentials(server).await?;
-    let username = credentials.username().as_str();
-    let password = credentials.password().as_str();
-
-    let (domain, user) = split_domain_username(username);
-    let full_username = if !domain.is_empty() {
-        format!("{}\\{}", domain, user)
-    } else {
-        user.to_string()
-    };
-
-    const CREATE_NO_WINDOW: u32 = 0x08000000;
-
-    // Cache credentials for the remote server
-    let _ = Command::new("cmdkey")
-        .args([
-            &format!("/add:{}", server),
-            &format!("/user:{}", full_username),
-            &format!("/pass:{}", password),
-        ])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output();
-
-    // taskschd.msc does not support /computer: switch directly.
-    // Use PowerShell to launch MMC and connect Task Scheduler to the remote host.
-    let ps_script = format!(
-        r#"$msc = 'taskschd.msc /s /computer:{}'
-Start-Process mmc.exe -ArgumentList $msc"#,
-        server
-    );
-
-    let result = Command::new("powershell.exe")
-        .args(["-NoProfile", "-NonInteractive", "-Command", &ps_script])
-        .creation_flags(CREATE_NO_WINDOW)
-        .spawn();
-
-    match result {
-        Ok(_) => {
-            logger::log_info(&format!(
-                "launch_task_scheduler: Successfully launched Task Scheduler for '{}'",
-                server
-            ));
-            Ok(())
-        }
-        Err(e) => {
-            let error_msg = format!("Failed to launch Task Scheduler: {}", e);
-            logger::log_error(&format!("launch_task_scheduler: {}", error_msg));
-            Err(error_msg)
-        }
-    }
-}
-
-#[cfg(not(windows))]
-#[tauri::command]
-async fn launch_task_scheduler(_server: String) -> Result<(), String> {
-    Err("Task Scheduler is only supported on Windows".to_string())
-}
-
-// Computer Management removed — compmgmt.msc is a composite snap-in whose
-// Event Viewer sub-node requires DCOM firewall rules ("Remote Event Log
-// Management") that are not enabled by default on most Windows servers.
+// MMC snap-in launchers removed — Computer Management, Event Viewer, and
+// Task Scheduler all require DCOM firewall rules or have other limitations
+// that make them unreliable for remote management.
 
 /// Launch regedit.exe for remote registry connection
 ///
-/// Launches the Windows Registry Editor and automatically connects to the remote registry
-/// using PowerShell automation to interact with the regedit UI.
+/// Caches credentials via cmdkey so the remote registry connection authenticates
+/// automatically, then launches regedit and automates the "Connect Network
+/// Registry" dialog via SendKeys.
 #[cfg(windows)]
 #[tauri::command]
 async fn launch_remote_registry(server: String) -> Result<(), String> {
@@ -3116,8 +3034,35 @@ async fn launch_remote_registry(server: String) -> Result<(), String> {
 
     const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-    // Test connectivity to remote registry with retries
-    // Service may take a moment to fully start after being enabled
+    // Retrieve stored credentials and cache them via cmdkey so regedit
+    // can authenticate against the remote server without prompting.
+    let (credentials, _) = resolve_host_credentials(server).await?;
+    let username = credentials.username().as_str();
+    let password = credentials.password().as_str();
+
+    let (domain, user) = split_domain_username(username);
+    let full_username = if !domain.is_empty() {
+        format!("{}\\{}", domain, user)
+    } else {
+        user.to_string()
+    };
+
+    let _ = Command::new("cmdkey")
+        .args([
+            &format!("/add:{}", server),
+            &format!("/user:{}", full_username),
+            &format!("/pass:{}", password),
+        ])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output();
+
+    logger::log_debug(&format!(
+        "launch_remote_registry: Cached credentials for '{}'",
+        server
+    ));
+
+    // Test connectivity to remote registry with retries.
+    // The RemoteRegistry service may still be starting up.
     let mut last_error = String::new();
     let max_retries = 3;
     let mut connected = false;
@@ -3153,27 +3098,22 @@ async fn launch_remote_registry(server: String) -> Result<(), String> {
             }
         }
 
-        // Wait before retrying (except on last attempt)
         if attempt < max_retries {
-            std::thread::sleep(std::time::Duration::from_millis(1000));
+            std::thread::sleep(std::time::Duration::from_millis(1500));
         }
     }
 
     if !connected {
         return Err(format!(
-            "Cannot connect to remote registry on {}. Ensure RemoteRegistry service is running and you have permissions. Last error: {}",
+            "Cannot connect to remote registry on {}. Ensure the RemoteRegistry service is running and you have permissions. Last error: {}",
             server, last_error.trim()
         ));
     }
 
-    // Launch regedit and use PowerShell to automate the connection to remote registry
-    // This PowerShell script:
-    // 1. Launches regedit with elevation
-    // 2. Waits for it to start
-    // 3. Uses UI automation to select File -> Connect Network Registry
-    // 4. Enters the server name and connects
+    // Launch regedit (no -Verb RunAs — cmdkey handles auth) and automate
+    // File → Connect Network Registry, type the server name, press Enter.
     let ps_script = format!(
-        r#"Start-Process -FilePath 'regedit.exe' -Verb RunAs -PassThru | Out-Null; Start-Sleep -Milliseconds 800; Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('%F'); Start-Sleep -Milliseconds 150; [System.Windows.Forms.SendKeys]::SendWait('C'); Start-Sleep -Milliseconds 300; [System.Windows.Forms.SendKeys]::SendWait('{}'); Start-Sleep -Milliseconds 150; [System.Windows.Forms.SendKeys]::SendWait('{{ENTER}}')"#,
+        r#"Start-Process -FilePath 'regedit.exe' -PassThru | Out-Null; Start-Sleep -Milliseconds 1000; Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('%F'); Start-Sleep -Milliseconds 200; [System.Windows.Forms.SendKeys]::SendWait('C'); Start-Sleep -Milliseconds 500; [System.Windows.Forms.SendKeys]::SendWait('{}'); Start-Sleep -Milliseconds 200; [System.Windows.Forms.SendKeys]::SendWait('{{ENTER}}')"#,
         server.replace("\\", "\\\\").replace("'", "''")
     );
 
@@ -6709,7 +6649,6 @@ fn main() {
             launch_rdp,
             launch_ssh,
             open_explorer_share,
-            launch_task_scheduler,
             launch_remote_registry,
             remote_restart,
             remote_shutdown,
