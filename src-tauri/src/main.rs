@@ -3009,105 +3009,12 @@ async fn open_explorer_share(_server: String) -> Result<(), String> {
 
 /// Launch an MMC snap-in targeting a remote server
 ///
-/// Caches credentials via cmdkey then launches the native MMC snap-in
-/// connected to the remote server. No UAC elevation required.
+// launch_mmc_snapin helper removed — was only used by Event Viewer which
+// requires DCOM firewall rules not enabled by default.
 
-/// Helper: cache credentials for a remote server so MMC snap-ins authenticate
-/// automatically, then launch the specified .msc snap-in.
-#[cfg(windows)]
-async fn launch_mmc_snapin(server: &str, snapin: &str, label: &str) -> Result<(), String> {
-    use std::os::windows::process::CommandExt;
-
-    if server.is_empty() {
-        return Err("Server name is required".to_string());
-    }
-
-    logger::log_info(&format!(
-        "launch_mmc_snapin: Launching {} for server '{}'",
-        label, server
-    ));
-
-    // Retrieve stored credentials
-    let (credentials, _) = resolve_host_credentials(server).await?;
-    let username = credentials.username().as_str();
-    let password = credentials.password().as_str();
-
-    // Build full domain\user format
-    let (domain, user) = split_domain_username(username);
-    let full_username = if !domain.is_empty() {
-        format!("{}\\{}", domain, user)
-    } else {
-        user.to_string()
-    };
-
-    const CREATE_NO_WINDOW: u32 = 0x08000000;
-
-    // Cache credentials so the MMC snap-in authenticates without prompting
-    let cmdkey_output = Command::new("cmdkey")
-        .args([
-            &format!("/add:{}", server),
-            &format!("/user:{}", full_username),
-            &format!("/pass:{}", password),
-        ])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output();
-
-    match &cmdkey_output {
-        Ok(o) if o.status.success() => {
-            logger::log_debug(&format!(
-                "launch_mmc_snapin: Cached credentials for '{}'",
-                server
-            ));
-        }
-        Ok(o) => {
-            let stderr = String::from_utf8_lossy(&o.stderr);
-            logger::log_warn(&format!(
-                "launch_mmc_snapin: cmdkey returned non-zero for '{}': {}",
-                server,
-                stderr.trim()
-            ));
-            // Continue anyway – the snap-in may still work with existing creds
-        }
-        Err(e) => {
-            logger::log_warn(&format!(
-                "launch_mmc_snapin: cmdkey failed for '{}': {}",
-                server, e
-            ));
-        }
-    }
-
-    // Launch the native MMC snap-in targeting the remote server
-    let result = Command::new("mmc.exe")
-        .args([snapin, &format!("/computer:{}", server)])
-        .spawn();
-
-    match result {
-        Ok(_) => {
-            logger::log_info(&format!(
-                "launch_mmc_snapin: Successfully launched {} for '{}'",
-                label, server
-            ));
-            Ok(())
-        }
-        Err(e) => {
-            let error_msg = format!("Failed to launch {}: {}", label, e);
-            logger::log_error(&format!("launch_mmc_snapin: {}", error_msg));
-            Err(error_msg)
-        }
-    }
-}
-
-#[cfg(windows)]
-#[tauri::command]
-async fn launch_event_viewer(server: String) -> Result<(), String> {
-    launch_mmc_snapin(server.trim(), "eventvwr.msc", "Event Viewer").await
-}
-
-#[cfg(not(windows))]
-#[tauri::command]
-async fn launch_event_viewer(_server: String) -> Result<(), String> {
-    Err("Event Viewer is only supported on Windows".to_string())
-}
+// Event Viewer removed — eventvwr.msc /computer: requires DCOM firewall rules
+// ("Remote Event Log Management" + "COM+ Network Access") on the target server
+// that are not enabled by default.
 
 #[cfg(windows)]
 #[tauri::command]
@@ -3183,73 +3090,9 @@ async fn launch_task_scheduler(_server: String) -> Result<(), String> {
     Err("Task Scheduler is only supported on Windows".to_string())
 }
 
-#[cfg(windows)]
-#[tauri::command]
-async fn launch_computer_management(server: String) -> Result<(), String> {
-    use std::os::windows::process::CommandExt;
-
-    let server = server.trim();
-    if server.is_empty() {
-        return Err("Server name is required".to_string());
-    }
-
-    logger::log_info(&format!(
-        "launch_computer_management: Launching Computer Management for server '{}'",
-        server
-    ));
-
-    // Retrieve stored credentials and cache them via cmdkey
-    let (credentials, _) = resolve_host_credentials(server).await?;
-    let username = credentials.username().as_str();
-    let password = credentials.password().as_str();
-
-    let (domain, user) = split_domain_username(username);
-    let full_username = if !domain.is_empty() {
-        format!("{}\\{}", domain, user)
-    } else {
-        user.to_string()
-    };
-
-    const CREATE_NO_WINDOW: u32 = 0x08000000;
-
-    // Cache credentials for the remote server
-    let _ = Command::new("cmdkey")
-        .args([
-            &format!("/add:{}", server),
-            &format!("/user:{}", full_username),
-            &format!("/pass:{}", password),
-        ])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output();
-
-    // compmgmt.msc is a composite snap-in. Launch it directly without going
-    // through the generic launch_mmc_snapin helper to avoid DCOM issues.
-    // The /computer: switch targets all sub-snap-ins to the remote host.
-    let result = Command::new("mmc.exe")
-        .args(["compmgmt.msc", &format!("/computer:{}", server)])
-        .spawn();
-
-    match result {
-        Ok(_) => {
-            logger::log_info(&format!(
-                "launch_computer_management: Successfully launched Computer Management for '{}'",
-                server
-            ));
-            Ok(())
-        }
-        Err(e) => {
-            let error_msg = format!("Failed to launch Computer Management: {}", e);
-            logger::log_error(&format!("launch_computer_management: {}", error_msg));
-            Err(error_msg)
-        }
-    }
-}
-
-#[cfg(not(windows))]
-#[tauri::command]
-async fn launch_computer_management(_server: String) -> Result<(), String> {
-    Err("Computer Management is only supported on Windows".to_string())
-}
+// Computer Management removed — compmgmt.msc is a composite snap-in whose
+// Event Viewer sub-node requires DCOM firewall rules ("Remote Event Log
+// Management") that are not enabled by default on most Windows servers.
 
 /// Launch regedit.exe for remote registry connection
 ///
@@ -6968,9 +6811,7 @@ fn main() {
             launch_rdp,
             launch_ssh,
             open_explorer_share,
-            launch_event_viewer,
             launch_task_scheduler,
-            launch_computer_management,
             launch_remote_registry,
             remote_restart,
             remote_shutdown,
