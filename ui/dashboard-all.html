@@ -5807,8 +5807,6 @@
                                     ${!isLinux ? `
                                     <li><hr class="my-2 border-t-2 border-base-300 opacity-80"></li>
                                     <li class="menu-title text-xs opacity-80 font-bold">System Tools${!qpIsElevated ? ' (requires Admin)' : ''}</li>
-                                    <li class="${!qpIsElevated ? 'disabled opacity-40 pointer-events-none' : ''}"><a class="comp-mgmt-btn whitespace-nowrap">🖥️ Computer Management</a></li>
-                                    <li class="${!qpIsElevated ? 'disabled opacity-40 pointer-events-none' : ''}"><a class="event-viewer-btn whitespace-nowrap">📋 Event Viewer</a></li>
                                     <li class="${!qpIsElevated ? 'disabled opacity-40 pointer-events-none' : ''}"><a class="task-scheduler-btn whitespace-nowrap">📅 Task Scheduler</a></li>
                                     <li class="${!qpIsElevated ? 'disabled opacity-40 pointer-events-none' : ''}"><a class="remote-registry-btn whitespace-nowrap">🗝️ Remote Registry</a></li>
                                     <li class="${!qpIsElevated ? 'disabled opacity-40 pointer-events-none' : ''}"><a class="stop-remote-registry-btn whitespace-nowrap">🗝️ Stop Remote Registry</a></li>
@@ -5907,26 +5905,6 @@
                 }
 
                 // === System Tools (Windows only) ===
-
-                // Computer Management button handler
-                const compMgmtBtn = card.querySelector('.comp-mgmt-btn');
-                if (compMgmtBtn) {
-                    compMgmtBtn.addEventListener('click', (e) => {
-                        e.stopPropagation();
-                        e.preventDefault();
-                        launchComputerManagement(server.name);
-                    });
-                }
-
-                // Event Viewer button handler
-                const eventViewerBtn = card.querySelector('.event-viewer-btn');
-                if (eventViewerBtn) {
-                    eventViewerBtn.addEventListener('click', (e) => {
-                        e.stopPropagation();
-                        e.preventDefault();
-                        launchEventViewer(server.name);
-                    });
-                }
 
                 // Task Scheduler button handler
                 const taskSchedulerBtn = card.querySelector('.task-scheduler-btn');
@@ -6228,8 +6206,6 @@
                                 ${!isLinux ? `
                                 <li><hr class="my-2 border-t-2 border-base-300 opacity-80"></li>
                                 <li class="menu-title text-xs opacity-80 font-bold">System Tools${!qpIsElevated ? ' (requires Admin)' : ''}</li>
-                                <li class="${!qpIsElevated ? 'disabled opacity-40 pointer-events-none' : ''}"><a class="comp-mgmt-btn whitespace-nowrap">🖥️ Computer Management</a></li>
-                                <li class="${!qpIsElevated ? 'disabled opacity-40 pointer-events-none' : ''}"><a class="event-viewer-btn whitespace-nowrap">📋 Event Viewer</a></li>
                                 <li class="${!qpIsElevated ? 'disabled opacity-40 pointer-events-none' : ''}"><a class="task-scheduler-btn whitespace-nowrap">📅 Task Scheduler</a></li>
                                 <li class="${!qpIsElevated ? 'disabled opacity-40 pointer-events-none' : ''}"><a class="remote-registry-btn whitespace-nowrap">🗝️ Remote Registry</a></li>
                                 <li class="${!qpIsElevated ? 'disabled opacity-40 pointer-events-none' : ''}"><a class="stop-remote-registry-btn whitespace-nowrap">🗝️ Stop Remote Registry</a></li>
@@ -6328,26 +6304,6 @@
             }
 
             // === System Tools (Windows only) ===
-
-            // Computer Management button handler
-            const compMgmtBtn = card.querySelector('.comp-mgmt-btn');
-            if (compMgmtBtn) {
-                compMgmtBtn.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    e.preventDefault();
-                    launchComputerManagement(server.name);
-                });
-            }
-
-            // Event Viewer button handler
-            const eventViewerBtn = card.querySelector('.event-viewer-btn');
-            if (eventViewerBtn) {
-                eventViewerBtn.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    e.preventDefault();
-                    launchEventViewer(server.name);
-                });
-            }
 
             // Task Scheduler button handler
             const taskSchedulerBtn = card.querySelector('.task-scheduler-btn');
@@ -7194,38 +7150,7 @@
             }
         }
 
-        // ===== MMC Snap-in Launcher =====
-        /**
-         * Launch an MMC snap-in targeting a remote server
-         * @param {string} serverName - The target server name
-         * @param {string} snapin - The MMC snap-in name (e.g., "compmgmt.msc")
-         * @param {string} label - User-friendly label for notifications
-         */
-        /**
-         * Launch Event Viewer using PowerShell (no UAC required)
-         * @param {string} serverName - The target server name
-         */
-        async function launchEventViewer(serverName) {
-            if (!serverName) {
-                showError('Server name is required');
-                return;
-            }
-            if (!window.__TAURI__) {
-                showError('Tauri API not available');
-                return;
-            }
-
-            try {
-                const { invoke } = window.__TAURI__.core;
-                await invoke('launch_event_viewer', { server: serverName });
-                showInfo(`Opening Event Viewer for ${serverName}`);
-            } catch (err) {
-                const message = err?.toString?.() ? err.toString() : `${err}`;
-                showError(`Failed to launch Event Viewer: ${message}`);
-                logDebug(`launch_event_viewer failed for ${serverName}: ${message}`);
-            }
-        }
-
+        // ===== System Tools Launchers =====
         /**
          * Launch Task Scheduler using PowerShell (no UAC required)
          * @param {string} serverName - The target server name
@@ -7248,31 +7173,6 @@
                 const message = err?.toString?.() ? err.toString() : `${err}`;
                 showError(`Failed to launch Task Scheduler: ${message}`);
                 logDebug(`launch_task_scheduler failed for ${serverName}: ${message}`);
-            }
-        }
-
-        /**
-         * Launch Computer Management using PowerShell (no UAC required)
-         * @param {string} serverName - The target server name
-         */
-        async function launchComputerManagement(serverName) {
-            if (!serverName) {
-                showError('Server name is required');
-                return;
-            }
-            if (!window.__TAURI__) {
-                showError('Tauri API not available');
-                return;
-            }
-
-            try {
-                const { invoke } = window.__TAURI__.core;
-                await invoke('launch_computer_management', { server: serverName });
-                showInfo(`Opening Computer Management for ${serverName}`);
-            } catch (err) {
-                const message = err?.toString?.() ? err.toString() : `${err}`;
-                showError(`Failed to launch Computer Management: ${message}`);
-                logDebug(`launch_computer_management failed for ${serverName}: ${message}`);
             }
         }
 
