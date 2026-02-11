@@ -561,3 +561,120 @@ impl RemoteSession for LinuxRemoteSession {
         LinuxRemoteSession::get_net_adapters(self).await
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Helper to construct a LinuxRemoteSession for testing parse_host_port.
+    fn session_with_name(name: &str) -> LinuxRemoteSession {
+        LinuxRemoteSession {
+            server_name: name.to_string(),
+            username: String::new(),
+            password: SecureString::new(""),
+        }
+    }
+
+    // ── parse_host_port ──────────────────────────────────────────────
+
+    #[test]
+    fn parse_host_port_default_port() {
+        let (host, port) = session_with_name("myserver").parse_host_port();
+        assert_eq!(host, "myserver");
+        assert_eq!(port, 22);
+    }
+
+    #[test]
+    fn parse_host_port_custom_port() {
+        let (host, port) = session_with_name("myserver:2222").parse_host_port();
+        assert_eq!(host, "myserver");
+        assert_eq!(port, 2222);
+    }
+
+    #[test]
+    fn parse_host_port_invalid_port_falls_back() {
+        let (host, port) = session_with_name("myserver:notaport").parse_host_port();
+        assert_eq!(host, "myserver:notaport");
+        assert_eq!(port, 22);
+    }
+
+    #[test]
+    fn parse_host_port_ipv4_with_port() {
+        let (host, port) = session_with_name("10.0.0.1:22222").parse_host_port();
+        assert_eq!(host, "10.0.0.1");
+        assert_eq!(port, 22222);
+    }
+
+    #[test]
+    fn parse_host_port_fqdn_with_port() {
+        let (host, port) = session_with_name("server.domain.com:8022").parse_host_port();
+        assert_eq!(host, "server.domain.com");
+        assert_eq!(port, 8022);
+    }
+
+    // ── parse_os_release ──────────────────────────────────────────────
+
+    #[test]
+    fn parse_os_release_ubuntu() {
+        let input = r#"NAME="Ubuntu"
+VERSION="22.04.3 LTS (Jammy Jellyfish)"
+ID=ubuntu
+VERSION_ID="22.04"
+"#;
+        let (name, version) = LinuxRemoteSession::parse_os_release(input);
+        assert_eq!(name, "Ubuntu");
+        // VERSION_ID overwrites VERSION when processed sequentially
+        assert_eq!(version, "22.04");
+    }
+
+    #[test]
+    fn parse_os_release_centos() {
+        let input = r#"NAME="CentOS Linux"
+VERSION="7 (Core)"
+ID=centos
+"#;
+        let (name, version) = LinuxRemoteSession::parse_os_release(input);
+        assert_eq!(name, "CentOS Linux");
+        assert_eq!(version, "7 (Core)");
+    }
+
+    #[test]
+    fn parse_os_release_empty_defaults_to_linux() {
+        let (name, version) = LinuxRemoteSession::parse_os_release("");
+        assert_eq!(name, "Linux");
+        assert_eq!(version, "");
+    }
+
+    #[test]
+    fn parse_os_release_no_quotes() {
+        let input = "NAME=Alpine\nVERSION_ID=3.19\n";
+        let (name, version) = LinuxRemoteSession::parse_os_release(input);
+        assert_eq!(name, "Alpine");
+        assert_eq!(version, "3.19");
+    }
+
+    // ── parse_meminfo ──────────────────────────────────────────────
+
+    #[test]
+    fn parse_meminfo_typical() {
+        let input = "MemTotal:       16384000 kB\nMemFree:         2048000 kB\nMemAvailable:    8192000 kB\n";
+        let (total_mb, avail_mb) = LinuxRemoteSession::parse_meminfo(input);
+        assert!((total_mb - 16000.0).abs() < 1.0);
+        assert!((avail_mb - 8000.0).abs() < 1.0);
+    }
+
+    #[test]
+    fn parse_meminfo_empty() {
+        let (total_mb, avail_mb) = LinuxRemoteSession::parse_meminfo("");
+        assert_eq!(total_mb, 0.0);
+        assert_eq!(avail_mb, 0.0);
+    }
+
+    #[test]
+    fn parse_meminfo_missing_available() {
+        let input = "MemTotal:       8192 kB\n";
+        let (total_mb, avail_mb) = LinuxRemoteSession::parse_meminfo(input);
+        assert_eq!(total_mb, 8.0);
+        assert_eq!(avail_mb, 0.0);
+    }
+}
