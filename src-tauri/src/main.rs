@@ -24,7 +24,7 @@ use quickprobe::{
     validate_credentials, CredentialStore,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs;
 use std::io::{BufWriter, Read, Write};
@@ -32,6 +32,7 @@ use std::io::{BufWriter, Read, Write};
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::{Arc, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{
     async_runtime,
@@ -41,9 +42,41 @@ use tauri::{
 };
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
 use tokio::net::TcpStream;
+use tokio::sync::RwLock;
 use tokio::time::{timeout, Duration};
 use zip::unstable::write::FileOptionsExt;
 use zip::{write::FileOptions, CompressionMethod, ZipArchive, ZipWriter};
+
+// ---------------------------------------------------------------------------
+// Session pool: cache WindowsRemoteSession per server to avoid redundant
+// credential resolution and construction on every heartbeat/probe cycle.
+// ---------------------------------------------------------------------------
+
+/// Maximum age of a cached session before it is evicted (seconds).
+const SESSION_CACHE_TTL_SECS: u64 = 300; // 5 minutes
+
+struct CachedSession {
+    session: Arc<WindowsRemoteSession>,
+    created_at: SystemTime,
+}
+
+/// Global session pool keyed by normalised server name.
+fn session_pool() -> &'static RwLock<HashMap<String, CachedSession>> {
+    static POOL: OnceLock<RwLock<HashMap<String, CachedSession>>> = OnceLock::new();
+    POOL.get_or_init(|| RwLock::new(HashMap::new()))
+}
+
+/// Remove a specific server from the session cache (e.g. after credential changes).
+async fn invalidate_session_cache(server_name: &str) {
+    let key = server_name.to_ascii_lowercase();
+    session_pool().write().await.remove(&key);
+}
+
+/// Clear the entire session cache.
+#[allow(dead_code)]
+async fn clear_session_cache() {
+    session_pool().write().await.clear();
+}
 
 /// Sanitize TCP port list ensuring uniqueness and valid range.
 fn sanitize_tcp_ports(ports: &[u16]) -> Vec<u16> {
@@ -1086,6 +1119,10 @@ async fn login(username: String, password: String) -> Result<LoginResponse, Stri
                 });
             }
 
+            // Credentials changed — flush the session cache so all servers
+            // pick up the new credentials on next probe cycle.
+            clear_session_cache().await;
+
             Ok(LoginResponse {
                 success: true,
                 error: None,
@@ -1108,6 +1145,9 @@ async fn logout(app: tauri::AppHandle) -> Result<(), String> {
         .delete(&profile)
         .await
         .map_err(|e| format!("Failed to delete credentials: {}", e))?;
+
+    // Credentials removed — flush the session cache.
+    clear_session_cache().await;
 
     // Note: In Tauri 2.x, tray menu item state management requires different approach
     // The options menu enable/disable is handled via the menu builder in setup
@@ -2660,20 +2700,29 @@ async fn resolve_host_credentials(server_name: &str) -> Result<(Credentials, Str
 
 /// Wrapper to hold either Windows or Linux remote session
 enum SessionKind {
-    Windows(WindowsRemoteSession),
+    Windows(Arc<WindowsRemoteSession>),
     Linux(LinuxRemoteSession),
 }
 
 impl SessionKind {
     fn as_remote(&self) -> &dyn RemoteSession {
         match self {
-            SessionKind::Windows(s) => s,
+            SessionKind::Windows(s) => s.as_ref(),
             SessionKind::Linux(s) => s,
         }
     }
 
     fn is_windows(&self) -> bool {
         matches!(self, SessionKind::Windows(_))
+    }
+
+    /// Borrow the inner WindowsRemoteSession if this is a Windows session.
+    #[allow(dead_code)]
+    fn as_windows(&self) -> Option<&WindowsRemoteSession> {
+        match self {
+            SessionKind::Windows(s) => Some(s.as_ref()),
+            _ => None,
+        }
     }
 }
 
@@ -2702,6 +2751,10 @@ async fn resolve_host_os_type(server_name: &str) -> String {
 }
 
 /// Connect to a remote session based on host OS.
+///
+/// For Windows hosts the session is served from a per-server cache so that
+/// repeated heartbeat/probe cycles don't pay credential resolution or retry
+/// overhead. Cached entries expire after `SESSION_CACHE_TTL_SECS`.
 async fn connect_remote_session(
     server_name: String,
     credentials: Credentials,
@@ -2714,23 +2767,78 @@ async fn connect_remote_session(
         server_name, os_hint
     ));
 
-    // Clone values for retry closure
+    // --- Windows session cache path ---
+    if !os_hint.eq_ignore_ascii_case("linux") {
+        let cache_key = server_name.to_ascii_lowercase();
+
+        // Check cache (read lock – fast, non-exclusive)
+        {
+            let pool = session_pool().read().await;
+            if let Some(cached) = pool.get(&cache_key) {
+                let age = cached.created_at.elapsed().unwrap_or_default().as_secs();
+                if age < SESSION_CACHE_TTL_SECS {
+                    logger::log_debug_verbose(&format!(
+                        "connect_remote_session: CACHE HIT '{}' (age {}s)",
+                        server_name, age
+                    ));
+                    return Ok(SessionKind::Windows(Arc::clone(&cached.session)));
+                }
+            }
+        }
+
+        // Cache miss or stale – create a new session
+        let server_clone = server_name.clone();
+        let creds_clone = credentials.clone();
+
+        let result = retry_with_backoff(
+            RetryConfig::default(),
+            || async {
+                WindowsRemoteSession::connect(server_clone.clone(), creds_clone.clone())
+                    .await
+            },
+            |err: &String| is_transient_error(err.as_str()),
+        )
+        .await;
+
+        match result {
+            Ok(session) => {
+                let arc = Arc::new(session);
+                {
+                    let mut pool = session_pool().write().await;
+                    pool.insert(
+                        cache_key,
+                        CachedSession {
+                            session: Arc::clone(&arc),
+                            created_at: SystemTime::now(),
+                        },
+                    );
+                }
+                logger::log_debug_verbose(&format!(
+                    "connect_remote_session: OK '{}' (cached)",
+                    server_name
+                ));
+                return Ok(SessionKind::Windows(arc));
+            }
+            Err(e) => {
+                logger::log_error(&format!(
+                    "connect_remote_session: FAILED '{}': {}",
+                    server_name, e
+                ));
+                return Err(e);
+            }
+        }
+    }
+
+    // --- Linux (SSH) session – not cached (stateful TCP connection) ---
     let server_clone = server_name.clone();
     let creds_clone = credentials.clone();
-    let os_clone = os_hint.to_string();
 
     let result = retry_with_backoff(
         RetryConfig::default(),
         || async {
-            if os_clone.eq_ignore_ascii_case("linux") {
-                LinuxRemoteSession::connect(server_clone.clone(), creds_clone.clone())
-                    .await
-                    .map(SessionKind::Linux)
-            } else {
-                WindowsRemoteSession::connect(server_clone.clone(), creds_clone.clone())
-                    .await
-                    .map(SessionKind::Windows)
-            }
+            LinuxRemoteSession::connect(server_clone.clone(), creds_clone.clone())
+                .await
+                .map(SessionKind::Linux)
         },
         |err: &String| is_transient_error(err.as_str()),
     )
@@ -3423,6 +3531,11 @@ async fn update_host(
         "update_host: SUCCESS for '{}', qp_hosts_changed bumped",
         normalized_name
     ));
+
+    // Invalidate session cache for this server so the next probe uses
+    // fresh settings (e.g. changed OS type => different session kind).
+    invalidate_session_cache(&normalized_name).await;
+
     Ok(())
 }
 
@@ -3624,7 +3737,7 @@ async fn get_system_health(
                         server_name, fast_ms, fast_err
                     ));
                     let fallback_start = SystemTime::now();
-                    match system_health_probe(win, services_slice, threshold).await {
+                    match system_health_probe(win.as_ref(), services_slice, threshold).await {
                         Ok(fallback) => {
                             let fallback_ms =
                                 fallback_start.elapsed().unwrap_or_default().as_millis();

@@ -13,7 +13,7 @@ QuickProbe lets you check server health, launch RDP sessions, and manage your fl
 
 ## Features
 
-- **Real-time health probes** — CPU, memory, disk, uptime, services, and more
+- **Real-time health probes** — CPU, memory, disk, uptime, services, and more (consolidated into single WinRM calls with explicit session cleanup)
 - **Dual-OS support** — Windows (WinRM) and Linux (SSH) targets
 - **One-click RDP launch** — Double-click to connect with stored credentials
 - **Remote management** — Manage services, processes, PowerShell/SSH, and file shares
@@ -137,6 +137,15 @@ ui/                     # Frontend
 ├── options.html        # Settings
 └── dashboard-utils.js  # Shared utilities
 ```
+
+## WinRM Session Management
+
+QuickProbe is designed to be safe against remote targets, even domain controllers:
+
+- **Explicit session cleanup** — Every `Invoke-Command` creates an explicit `PSSession` that is torn down in a `finally` block via `Remove-PSSession`. This prevents `wsmprovhost.exe` accumulation on target servers.
+- **No pre-flight connectivity check on probes** — The `Test-WSMan` validation is only used for user-initiated actions (adding a host, testing credentials), not on the recurring heartbeat path. This halves the per-probe session count.
+- **Session caching** — `WindowsRemoteSession` handles are cached per-server with a 5-minute TTL. The cache is invalidated on credential or host config changes.
+- **Throttled heartbeat** — The dashboard polls every 120 seconds (with jitter) and enforces a 60-second minimum between quick probes to the same host. A circuit-breaker pattern backs off failing servers exponentially.
 
 ## Security
 
