@@ -232,20 +232,26 @@ Write-ColorOutput "`n===========================================================
 Write-ColorOutput "           QuickProbe Release Script                        " "Cyan"
 Write-ColorOutput "============================================================" "Cyan"
 
-# Get current version
+# Get and display current version prominently
 try {
     $currentVersion = Get-CurrentVersion
-    Write-ColorOutput "`nCurrent version: $currentVersion" "White"
 }
 catch {
     Write-ErrorMsg "Failed to read current version: $_"
     exit 1
 }
 
-# Prompt for version if not provided
+Write-Host ""
+Write-ColorOutput "  Current version:  v$currentVersion" "Green"
+Write-Host ""
+
+# --- Step 1: Version ---
 if ([string]::IsNullOrWhiteSpace($Version)) {
-    Write-Host ""
-    $Version = Read-Host "Enter new version (current: $currentVersion)"
+    $Version = Read-Host "  New version"
+    if ([string]::IsNullOrWhiteSpace($Version)) {
+        Write-ErrorMsg "Version cannot be empty"
+        exit 1
+    }
 }
 
 # Validate version format
@@ -262,7 +268,7 @@ if ($comparison -eq 0 -and -not $Force) {
 }
 if ($comparison -lt 0 -and -not $Force) {
     Write-WarningMsg "Version $Version is older than current version ($currentVersion)"
-    $confirm = Read-Host "Continue anyway? (y/N)"
+    $confirm = Read-Host "  Continue anyway? (y/N)"
     if ($confirm -ne 'y' -and $confirm -ne 'Y') {
         Write-ColorOutput "Release cancelled" "Yellow"
         exit 0
@@ -289,21 +295,23 @@ if (Test-GitTagExists $tagName) {
     }
 }
 
-# Prompt for release notes if not provided
+# --- Step 2: Release notes ---
 if ([string]::IsNullOrWhiteSpace($Notes)) {
     Write-Host ""
-    Write-ColorOutput "Enter release notes (press Enter twice when done):" "White"
+    Write-ColorOutput "  Release notes (one item per line, empty line to finish):" "White"
     $noteLines = @()
+    $lineNum = 1
     while ($true) {
-        $line = Read-Host
+        $line = Read-Host "    $lineNum"
         if ([string]::IsNullOrWhiteSpace($line)) {
             if ($noteLines.Count -eq 0) {
-                Write-WarningMsg "Release notes cannot be empty"
+                Write-WarningMsg "  Release notes cannot be empty. Enter at least one line."
                 continue
             }
             break
         }
         $noteLines += $line
+        $lineNum++
     }
     $Notes = $noteLines -join "`n"
 }
