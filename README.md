@@ -100,17 +100,15 @@ This allows you to use different accounts for specific servers while maintaining
 
 ## Building from Source
 
-```bash
-# Prerequisites: Rust, Node.js, npm
+See [docs/BUILD_FROM_SCRATCH.md](docs/BUILD_FROM_SCRATCH.md) for full Windows build instructions.
 
-# Install dependencies
-npm install
+**Quick start:**
 
-# Development mode
-npm run dev
-
-# Production build
-npm run build
+```powershell
+# Prerequisites: Rust, Node.js, Strawberry Perl, VS Build Tools
+npm ci
+pwsh -File scripts/verify.ps1   # format + lint + test + build
+npm run dev                     # development mode
 ```
 
 ## Project Structure
