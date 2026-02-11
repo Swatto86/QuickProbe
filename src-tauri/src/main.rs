@@ -2453,7 +2453,9 @@ fn validate_rdp_parameter(value: &str, param_name: &str) -> Result<(), String> {
 
         // Check for path traversal attempts in hostname (could write to Startup folder)
         if value.contains("..") || value.contains('\\') || value.contains('/') {
-            return Err("Invalid hostname: contains path separators or traversal sequences".to_string());
+            return Err(
+                "Invalid hostname: contains path separators or traversal sequences".to_string(),
+            );
         }
 
         // Basic hostname validation: alphanumeric, dots, hyphens, colons (for ports)
@@ -2793,8 +2795,7 @@ async fn connect_remote_session(
         let result = retry_with_backoff(
             RetryConfig::default(),
             || async {
-                WindowsRemoteSession::connect(server_clone.clone(), creds_clone.clone())
-                    .await
+                WindowsRemoteSession::connect(server_clone.clone(), creds_clone.clone()).await
             },
             |err: &String| is_transient_error(err.as_str()),
         )
