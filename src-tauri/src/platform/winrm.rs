@@ -1,7 +1,21 @@
 //! Windows Remote Session via WinRM/PSRemoting
 //!
 //! Provides real WinRM connectivity using PowerShell Remoting.
-//! Implements the RemoteSession trait for production use.
+//! Implements the `RemoteSession` trait for production use.
+//!
+//! # Session lifecycle
+//!
+//! Each `execute_remote()` call creates an **explicit** `PSSession` via
+//! `New-PSSession`, executes the script with `Invoke-Command -Session`,
+//! and tears it down with `Remove-PSSession` inside a `finally` block.
+//! This guarantees the remote `wsmprovhost.exe` process is freed
+//! immediately, preventing memory accumulation on target servers.
+//!
+//! `connect()` is lightweight (no network call). The previous
+//! `Test-WSMan` pre-check was removed from the hot path to avoid
+//! creating a redundant implicit session per probe cycle. Use
+//! `validate_reachability()` for explicit checks on user-initiated
+//! actions.
 
 use crate::core::{
     session::{
@@ -11,7 +25,7 @@ use crate::core::{
     },
     SystemHealthSummary,
 };
-use crate::models::{Credentials, SecureString};
+use crate::models::{Credentials, SecureString, Username};
 use base64::{engine::general_purpose, Engine as _};
 use serde::{Deserialize, Serialize};
 use serde_json::{Number, Value};
@@ -702,18 +716,30 @@ impl WindowsRemoteSession {
     /// `Ok(session)` if connection successful, otherwise error message
     ///
     /// # Connection Process
-    /// 1. Validates server accessibility (quick ping)
-    /// 2. Attempts WinRM connection with provided credentials
-    /// 3. Returns session or error
+    /// 1. Returns a session handle (lightweight, no network call)
+    /// 2. Actual WinRM connectivity is validated on first `execute_remote()` call
+    ///
+    /// Note: The previous `Test-WSMan` pre-check was removed to avoid creating
+    /// an extra implicit PSSession on the remote server for every probe cycle.
+    /// Use `validate_connectivity()` explicitly when you need to verify reachability
+    /// (e.g., when the user first adds a host).
     pub async fn connect(server_name: String, credentials: Credentials) -> Result<Self, String> {
-        // Validate server is reachable using supplied credentials to avoid false negatives.
-        Self::validate_connectivity(&server_name, &credentials).await?;
-
         Ok(Self {
             server_name,
             username: credentials.username().to_string(),
             password: credentials.password().clone(),
         })
+    }
+
+    /// Explicitly validate that the server is reachable via WinRM.
+    ///
+    /// Call this for user-initiated actions (e.g., adding a new host, testing credentials)
+    /// but NOT on the recurring heartbeat/probe path to avoid session accumulation.
+    pub async fn validate_reachability(&self) -> Result<(), String> {
+        let username = Username::new(self.username.clone())
+            .map_err(|e| format!("Invalid cached username: {}", e))?;
+        let creds = Credentials::new(username, self.password.clone());
+        Self::validate_connectivity(&self.server_name, &creds).await
     }
 
     /// Validate server is reachable
@@ -1519,6 +1545,7 @@ try {
         .map_err(|e| format!("Failed to serialize PowerShell payload: {}", e))?;
 
         let ps_script = r#"$ErrorActionPreference = 'Stop'
+$session = $null
 try {
     $raw = [Console]::In.ReadToEnd()
     if ([string]::IsNullOrWhiteSpace($raw)) { throw 'No input provided' }
@@ -1535,8 +1562,14 @@ try {
     $pwPlain.ToCharArray() | ForEach-Object { $pwSecure.AppendChar($_) }
     $cred = New-Object System.Management.Automation.PSCredential($username, $pwSecure)
 
+    # Create an explicit PSSession so we can guarantee cleanup via Remove-PSSession.
+    # Without this, Invoke-Command -ComputerName creates implicit sessions that rely
+    # on WinRM idle timeout (default 2 hours) for cleanup, causing wsmprovhost.exe
+    # accumulation and memory leaks on the remote server.
+    $session = New-PSSession -ComputerName $server -Credential $cred -ErrorAction Stop
+
     # Execute inside the remote session by passing the decoded script as an argument to avoid inline quoting issues
-    Invoke-Command -ComputerName $server -Credential $cred -ErrorAction Stop -ScriptBlock {
+    Invoke-Command -Session $session -ErrorAction Stop -ScriptBlock {
         param($scriptText)
         $sb = [ScriptBlock]::Create($scriptText)
         & $sb
@@ -1544,6 +1577,11 @@ try {
 } catch {
     Write-Error $_.Exception.Message
     exit 1
+} finally {
+    # Explicitly destroy the remote session to free wsmprovhost.exe on the target server immediately
+    if ($session) {
+        Remove-PSSession -Session $session -ErrorAction SilentlyContinue
+    }
 }"#;
 
         // Execute in background to avoid blocking.

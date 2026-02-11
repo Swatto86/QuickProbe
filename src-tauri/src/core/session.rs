@@ -2,6 +2,13 @@
 //!
 //! This trait allows testing without real servers by supporting mock implementations.
 //! Platform-specific implementations are in `src/platform/`.
+//!
+//! # Session safety
+//!
+//! Implementors must ensure remote sessions are explicitly cleaned up after
+//! each operation. The Windows implementation (`WindowsRemoteSession`) uses
+//! `New-PSSession` / `Remove-PSSession` in a `try/finally` to guarantee
+//! `wsmprovhost.exe` is released on the target server.
 
 use serde::{Deserialize, Serialize};
 

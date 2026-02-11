@@ -27,3 +27,9 @@
 - Handle errors explicitly
 - Validate inputs defensively
 - Keep functions focused and testable
+
+## WinRM Session Rules
+- **Always use explicit `New-PSSession` / `Remove-PSSession`** in `execute_remote()`. Never use bare `Invoke-Command -ComputerName` which creates implicit sessions that rely on WinRM idle timeout (default 2 hours) for cleanup.
+- **Do not add connectivity pre-checks to the heartbeat path.** `Test-WSMan` or similar validation creates an extra session per probe. Reserve it for user-initiated actions only.
+- **Session caching** is handled in `main.rs` via a global `RwLock<HashMap>` pool with a 5-minute TTL. Invalidate on credential/host changes.
+- **Heartbeat interval is 120 seconds.** Don't reduce below 60s without considering the session load on target servers (especially domain controllers).

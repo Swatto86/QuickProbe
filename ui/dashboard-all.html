@@ -896,11 +896,11 @@
         let settingsBundle = settingsDefaultBundle();
         const MAX_CACHE_AGE_MS = 5 * 60 * 1000; // 5 minutes
         const MAX_CONCURRENT_PROBES = 10;
-        const HEARTBEAT_INTERVAL_MS = 20000;
+        const HEARTBEAT_INTERVAL_MS = 120000;
         const HEARTBEAT_TIMEOUT_MS = 60000; // fallback; actual timeout comes from settings
-        const HEARTBEAT_JITTER_MS = 500;
-        const HEARTBEAT_STALE_MS = 180000;
-        const QUICK_PROBE_MIN_INTERVAL_MS = 30000;
+        const HEARTBEAT_JITTER_MS = 2000;
+        const HEARTBEAT_STALE_MS = 360000;
+        const QUICK_PROBE_MIN_INTERVAL_MS = 60000;
 
         function disableAutocomplete() {
             const fields = document.querySelectorAll('input, textarea');
