@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -12,7 +13,32 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  verify:
+    name: Verify
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('src-tauri/Cargo.lock') }}
+
+      - name: Run verification
+        shell: pwsh
+        run: pwsh -File scripts/verify.ps1
+
   create-release:
+    needs: verify
     runs-on: ubuntu-latest
     outputs:
       release_id: ${{ steps.create-release.outputs.result }}
@@ -24,9 +50,7 @@ jobs:
           fetch-depth: 0
 
       - name: Fetch tags with annotations
-        run: |
-          # Ensure we have all tag data including annotations
-          git fetch --tags --force
+        run: git fetch --tags --force
 
       - name: Get release notes from tag
         id: get-notes
@@ -34,36 +58,19 @@ jobs:
           TAG_NAME=${GITHUB_REF#refs/tags/}
           echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
           
-          echo "Extracting release notes for tag: $TAG_NAME"
-          
-          # Use git for-each-ref to get the FULL tag annotation (body/contents)
-          # This is more reliable than git tag -n which can truncate
           NOTES=$(git for-each-ref --format='%(contents)' "refs/tags/$TAG_NAME" 2>/dev/null || echo "")
           
-          # Debug output
-          echo "Raw notes extracted:"
-          echo "$NOTES"
-          echo "---"
-          
-          # If empty, try fallback method
           if [ -z "$(echo "$NOTES" | tr -d '[:space:]')" ]; then
-            echo "Trying fallback method..."
             RAW_NOTES=$(git tag -l -n1000 "$TAG_NAME" 2>/dev/null || echo "")
             if [ -n "$RAW_NOTES" ]; then
               NOTES=$(echo "$RAW_NOTES" | sed "s/^${TAG_NAME}[[:space:]]*//")
             fi
           fi
 
-          # If still empty, use default message
           if [ -z "$(echo "$NOTES" | tr -d '[:space:]')" ]; then
-            echo "No notes found, using default message"
             NOTES=$(printf "Release %s\n\nSee the assets below to download and install this version." "$TAG_NAME")
           fi
 
-          echo "Final release notes:"
-          echo "$NOTES"
-
-          # Escape for GitHub Actions output (handle multi-line)
           {
             echo 'notes<<EOF'
             echo "$NOTES"
@@ -79,7 +86,6 @@ jobs:
         with:
           script: |
             const { TAG_NAME, RELEASE_NOTES } = process.env;
-            
             const release = await github.rest.repos.createRelease({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -89,7 +95,6 @@ jobs:
               draft: true,
               prerelease: false
             });
-            
             return release.data.id;
 
   build-windows:
@@ -126,6 +131,39 @@ jobs:
           includeUpdaterJson: true
           updaterJsonKeepUniversal: true
 
+      - name: Generate SHA256 checksums
+        shell: pwsh
+        run: |
+          $artifacts = Get-ChildItem -Path "src-tauri/target/release/bundle/nsis" -File -ErrorAction SilentlyContinue
+          if ($artifacts) {
+            $checksums = $artifacts | ForEach-Object {
+              $hash = (Get-FileHash -Path $_.FullName -Algorithm SHA256).Hash.ToLower()
+              "$hash  $($_.Name)"
+            }
+            $checksums | Out-File -FilePath "SHA256SUMS.txt" -Encoding utf8
+            Write-Host "Generated checksums:"
+            Get-Content "SHA256SUMS.txt"
+          } else {
+            Write-Host "No artifacts found in bundle/nsis — checksums skipped"
+          }
+
+      - name: Upload checksums to release
+        if: hashFiles('SHA256SUMS.txt') != ''
+        uses: actions/github-script@v7
+        env:
+          RELEASE_ID: ${{ needs.create-release.outputs.release_id }}
+        with:
+          script: |
+            const fs = require('fs');
+            const data = fs.readFileSync('SHA256SUMS.txt');
+            await github.rest.repos.uploadReleaseAsset({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: parseInt(process.env.RELEASE_ID),
+              name: 'SHA256SUMS.txt',
+              data: data,
+            });
+
   publish-release:
     needs: [create-release, build-windows]
     runs-on: ubuntu-latest
@@ -139,7 +177,7 @@ jobs:
             await github.rest.repos.updateRelease({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              release_id: process.env.RELEASE_ID,
+              release_id: parseInt(process.env.RELEASE_ID),
               draft: false
             });
             console.log(`Published release ${process.env.RELEASE_ID}`);
