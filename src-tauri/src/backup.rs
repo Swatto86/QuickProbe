@@ -243,3 +243,227 @@ pub fn apply_backup_payload(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── build_backup_manifest ─────────────────────────────────────
+
+    #[test]
+    fn manifest_sets_app_name_and_version() {
+        let m = build_backup_manifest("2.0.4", 1700000000000);
+        assert_eq!(m.app, "QuickProbe");
+        assert_eq!(m.version, "2.0.4");
+        assert_eq!(m.created_epoch_ms, 1700000000000);
+    }
+
+    // ── build_backup_payload ──────────────────────────────────────
+
+    #[test]
+    fn payload_has_correct_schema_version() {
+        let mode = RuntimeModeInfo {
+            mode: "normal".to_string(),
+            details: ModeDetails::default(),
+            config_source: "default".to_string(),
+        };
+        let payload = build_backup_payload(vec![], BTreeMap::new(), mode, "2.0.4");
+        assert_eq!(payload.schema_version, BACKUP_SCHEMA_VERSION);
+        assert_eq!(payload.app_version, "2.0.4");
+        assert!(payload.hosts.is_empty());
+    }
+
+    // ── normalize_backup_hosts ────────────────────────────────────
+
+    fn host(name: &str, os: &str) -> HostBackupRow {
+        HostBackupRow {
+            server_name: name.to_string(),
+            notes: None,
+            group: None,
+            os_type: os.to_string(),
+            services: None,
+        }
+    }
+
+    #[test]
+    fn normalize_single_host() {
+        let hosts = vec![host("server1.domain.com", "Windows")];
+        let result = normalize_backup_hosts(&hosts).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].server_name, "SERVER1");
+        assert_eq!(result[0].os_type, "Windows");
+    }
+
+    #[test]
+    fn normalize_deduplicates_by_normalized_name() {
+        let hosts = vec![
+            host("SERVER1", "Windows"),
+            host("server1.domain.com", "Windows"),
+        ];
+        let result = normalize_backup_hosts(&hosts);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Duplicate"));
+    }
+
+    #[test]
+    fn normalize_preserves_notes_and_group() {
+        let hosts = vec![HostBackupRow {
+            server_name: "server1".to_string(),
+            notes: Some("  Production server  ".to_string()),
+            group: Some(" Web Tier ".to_string()),
+            os_type: "Windows".to_string(),
+            services: Some("IIS;DNS".to_string()),
+        }];
+        let result = normalize_backup_hosts(&hosts).unwrap();
+        assert_eq!(result[0].notes, "Production server");
+        assert_eq!(result[0].group, "Web Tier");
+        // Services are normalized: trimmed, uppercased, sorted, deduped
+        assert!(result[0].services.contains("IIS"));
+        assert!(result[0].services.contains("DNS"));
+    }
+
+    #[test]
+    fn normalize_defaults_missing_fields() {
+        let hosts = vec![host("server1", "")];
+        let result = normalize_backup_hosts(&hosts).unwrap();
+        assert_eq!(result[0].notes, "");
+        assert_eq!(result[0].group, "");
+        assert_eq!(result[0].os_type, "Windows"); // default
+    }
+
+    #[test]
+    fn normalize_empty_hosts_list() {
+        let result = normalize_backup_hosts(&[]).unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn normalize_linux_os_type() {
+        let hosts = vec![host("linuxbox", "Linux")];
+        let result = normalize_backup_hosts(&hosts).unwrap();
+        assert_eq!(result[0].os_type, "Linux");
+    }
+
+    // ── apply_backup_payload (integration with SQLite) ────────────
+
+    fn setup_db() -> rusqlite::Connection {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "
+            CREATE TABLE hosts (
+                server_name TEXT PRIMARY KEY,
+                notes TEXT DEFAULT '',
+                group_name TEXT DEFAULT '',
+                os_type TEXT DEFAULT 'Windows',
+                services TEXT DEFAULT ''
+            );
+            CREATE TABLE kv (
+                scope_type TEXT NOT NULL,
+                scope_id TEXT NOT NULL,
+                key TEXT NOT NULL,
+                value TEXT,
+                updated_at TEXT DEFAULT (datetime('now')),
+                UNIQUE(scope_type, scope_id, key)
+            );
+            ",
+        )
+        .unwrap();
+        conn
+    }
+
+    fn make_payload(hosts: Vec<HostBackupRow>, schema: u32) -> BackupPayload {
+        BackupPayload {
+            schema_version: schema,
+            exported_at: "2026-01-01T00:00:00Z".to_string(),
+            app_version: "2.0.4".to_string(),
+            mode: RuntimeModeInfo {
+                mode: "normal".to_string(),
+                details: ModeDetails::default(),
+                config_source: "default".to_string(),
+            },
+            hosts,
+            kv: BTreeMap::from([(
+                "qp_settings".to_string(),
+                Some("{\"theme\":\"dark\"}".to_string()),
+            )]),
+        }
+    }
+
+    #[test]
+    fn apply_payload_inserts_hosts_and_kv() {
+        let mut conn = setup_db();
+        let payload = make_payload(vec![host("server1", "Windows")], BACKUP_SCHEMA_VERSION);
+        let tx = conn.transaction().unwrap();
+        apply_backup_payload(
+            &tx,
+            &payload,
+            "global",
+            "default",
+            BACKUP_KV_KEYS,
+            1700000000000,
+        )
+        .unwrap();
+        tx.commit().unwrap();
+
+        let count: i32 = conn
+            .query_row("SELECT COUNT(*) FROM hosts", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
+
+        let kv_val: String = conn
+            .query_row("SELECT value FROM kv WHERE key = 'qp_settings'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(kv_val, "{\"theme\":\"dark\"}");
+    }
+
+    #[test]
+    fn apply_payload_rejects_wrong_schema_version() {
+        let mut conn = setup_db();
+        let payload = make_payload(vec![], 999);
+        let tx = conn.transaction().unwrap();
+        let result = apply_backup_payload(&tx, &payload, "global", "default", BACKUP_KV_KEYS, 0);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("schema version"));
+    }
+
+    #[test]
+    fn apply_payload_clears_existing_hosts() {
+        let mut conn = setup_db();
+        conn.execute("INSERT INTO hosts(server_name) VALUES ('OLDHOST')", [])
+            .unwrap();
+
+        let payload = make_payload(vec![host("newhost", "Windows")], BACKUP_SCHEMA_VERSION);
+        let tx = conn.transaction().unwrap();
+        apply_backup_payload(&tx, &payload, "global", "default", BACKUP_KV_KEYS, 0).unwrap();
+        tx.commit().unwrap();
+
+        let names: Vec<String> = conn
+            .prepare("SELECT server_name FROM hosts")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect();
+        assert_eq!(names, vec!["NEWHOST"]);
+    }
+
+    #[test]
+    fn apply_payload_sets_hosts_changed_timestamp() {
+        let mut conn = setup_db();
+        let payload = make_payload(vec![], BACKUP_SCHEMA_VERSION);
+        let tx = conn.transaction().unwrap();
+        apply_backup_payload(&tx, &payload, "global", "default", BACKUP_KV_KEYS, 42).unwrap();
+        tx.commit().unwrap();
+
+        let val: String = conn
+            .query_row(
+                "SELECT value FROM kv WHERE key = 'qp_hosts_changed'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(val, "42");
+    }
+}
