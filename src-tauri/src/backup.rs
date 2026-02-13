@@ -1,10 +1,24 @@
+//! Encrypted backup and restore for QuickProbe.
+//!
+//! Provides AES-256-encrypted ZIP export/import of the host inventory,
+//! KV settings, and runtime mode metadata. The backup payload is
+//! schema-versioned so future migrations can handle older exports.
+//!
+//! All host data is normalised during restore to match the canonical
+//! representation used by the database layer.
+
 use chrono::Utc;
 use rusqlite::Transaction;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
 
+/// Application name embedded in every backup manifest.
 pub const APP_NAME: &str = "QuickProbe";
+
+/// Current schema version for backup payloads.
 pub const BACKUP_SCHEMA_VERSION: u32 = 1;
+
+/// KV store keys included in backup/restore operations.
 pub const BACKUP_KV_KEYS: &[&str] = &[
     "qp_settings",
     "qp_server_order",
@@ -12,6 +26,7 @@ pub const BACKUP_KV_KEYS: &[&str] = &[
     "qp_hosts_changed",
 ];
 
+/// Lightweight manifest written into every backup ZIP to identify origin and version.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct BackupManifest {
     pub app: String,
@@ -19,6 +34,7 @@ pub struct BackupManifest {
     pub created_epoch_ms: u128,
 }
 
+/// One row of host data as serialised inside a backup ZIP.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct HostBackupRow {
     #[serde(rename = "serverName")]
@@ -33,12 +49,14 @@ pub struct HostBackupRow {
     pub services: Option<String>,
 }
 
+/// Optional details attached to a runtime mode (e.g. database path for local mode).
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct ModeDetails {
     #[serde(rename = "dbPath")]
     pub db_path: Option<String>,
 }
 
+/// Runtime mode metadata captured at export time.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct RuntimeModeInfo {
     pub mode: String,
@@ -47,6 +65,7 @@ pub struct RuntimeModeInfo {
     pub config_source: String,
 }
 
+/// Complete backup payload: schema version, hosts, KV settings, and runtime mode.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct BackupPayload {
     #[serde(rename = "schemaVersion")]
@@ -60,6 +79,7 @@ pub struct BackupPayload {
     pub kv: BTreeMap<String, Option<String>>,
 }
 
+/// A host row after normalisation, ready for database insertion during restore.
 #[derive(Debug, Clone)]
 pub struct NormalizedBackupHost {
     pub server_name: String,
@@ -69,6 +89,7 @@ pub struct NormalizedBackupHost {
     pub services: String,
 }
 
+/// Build a [`BackupManifest`] from the given app version and epoch timestamp.
 pub fn build_backup_manifest(app_version: &str, created_epoch_ms: u128) -> BackupManifest {
     BackupManifest {
         app: APP_NAME.to_string(),
@@ -77,6 +98,7 @@ pub fn build_backup_manifest(app_version: &str, created_epoch_ms: u128) -> Backu
     }
 }
 
+/// Build a complete [`BackupPayload`] ready for serialisation into an encrypted ZIP.
 pub fn build_backup_payload(
     hosts: Vec<HostBackupRow>,
     kv: BTreeMap<String, Option<String>>,

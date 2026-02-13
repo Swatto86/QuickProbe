@@ -1,9 +1,19 @@
+//! Structured file-based logger for QuickProbe.
+//!
+//! Provides timestamped, level-tagged log output to a rotating file under
+//! `%LOCALAPPDATA%/QuickProbe/logs/`. In debug builds logging is always
+//! enabled; in release builds it requires `QP_ENABLE_LOGGING=1`.
+//!
+//! Log rotation occurs automatically when the file exceeds [`MAX_LOG_BYTES`].
+//! Sensitive data (credentials, tokens) must never be passed to these functions.
+
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+/// Maximum log file size before rotation (10 MiB).
 const MAX_LOG_BYTES: u64 = 10 * 1024 * 1024;
 
 struct Logger {
@@ -88,6 +98,9 @@ fn get_logger() -> Option<&'static Logger> {
     Some(LOGGER.get_or_init(Logger::init))
 }
 
+/// Initialise the global logger singleton.
+///
+/// Safe to call multiple times; only the first call has an effect.
 pub fn init_dev_logger() {
     // Initialize logger in all builds
     // In debug: always logs to file
@@ -95,10 +108,12 @@ pub fn init_dev_logger() {
     let _ = get_logger();
 }
 
+/// Write a DEBUG-level message to the log file.
 pub fn log_debug(message: &str) {
     log_internal("DEBUG", message, false);
 }
 
+/// Write a DEBUG-level message only when verbose logging (`QP_LOG_VERBOSE=1`) is active.
 #[allow(dead_code)]
 pub fn log_debug_verbose(message: &str) {
     if let Some(logger) = get_logger() {
@@ -108,14 +123,17 @@ pub fn log_debug_verbose(message: &str) {
     }
 }
 
+/// Write an INFO-level message to the log file.
 pub fn log_info(message: &str) {
     log_internal("INFO", message, false);
 }
 
+/// Write a WARN-level message to the log file.
 pub fn log_warn(message: &str) {
     log_internal("WARN", message, false);
 }
 
+/// Write an ERROR-level message to the log file.
 pub fn log_error(message: &str) {
     log_internal("ERROR", message, false);
 }
