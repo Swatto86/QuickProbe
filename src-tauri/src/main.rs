@@ -1,3 +1,11 @@
+//! QuickProbe — Tauri application entry point and command handlers.
+//!
+//! This binary crate wires up the Tauri runtime, registers all IPC commands
+//! exposed to the frontend, and manages the global session pool, backup/restore
+//! flow, settings persistence, and system-tray lifecycle.
+//!
+//! Platform-agnostic types live in `lib.rs`; this file is Windows-only glue.
+
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod logger;

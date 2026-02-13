@@ -1,5 +1,14 @@
+//! Input normalisation helpers for host names, service names, and OS types.
+//!
+//! Every user-supplied string passes through one of these functions before
+//! reaching the database, ensuring a single canonical representation
+//! (uppercase, trimmed, deduplicated) across the application.
+
 use std::collections::HashSet;
 
+/// Normalise a server name: trim whitespace, strip FQDN domain, and uppercase.
+///
+/// Returns an error if the resulting name is empty.
 pub fn normalize_server_name(input: &str) -> Result<String, String> {
     let trimmed = input.trim();
     if trimmed.is_empty() {
@@ -14,6 +23,10 @@ pub fn normalize_server_name(input: &str) -> Result<String, String> {
     Ok(short.to_uppercase())
 }
 
+/// Normalise a single Windows/Linux service name.
+///
+/// Trims whitespace, enforces a 64-character limit, validates allowed characters
+/// (`A-Z 0-9 - _ $ <space>`), and uppercases the result.
 pub fn normalize_service_name(raw: &str) -> Result<String, String> {
     const MAX_LEN: usize = 64;
     let trimmed = raw.trim();
@@ -57,11 +70,15 @@ where
     Ok(cleaned.join(";"))
 }
 
+/// Normalise a semicolon-delimited service list string.
+///
+/// Splits on `;`, normalises each name, deduplicates, and rejoins with `;`.
 #[allow(dead_code)]
 pub fn normalize_services(input: &str) -> Result<String, String> {
     normalize_services_iter(input.split(';').map(|s| s.trim()).filter(|s| !s.is_empty()))
 }
 
+/// Normalise an iterator of individual service names into a canonical semicolon-separated string.
 pub fn normalize_services_list<I, S>(services: I) -> Result<String, String>
 where
     I: IntoIterator<Item = S>,
@@ -70,6 +87,9 @@ where
     normalize_services_iter(services)
 }
 
+/// Normalise an OS type string to either `"Windows"` or `"Linux"`.
+///
+/// Defaults to `"Windows"` for empty, missing, or unrecognised values.
 pub fn normalize_os_type(input: Option<&str>) -> String {
     let trimmed = input.map(|raw| raw.trim()).unwrap_or("");
     if trimmed.is_empty() {

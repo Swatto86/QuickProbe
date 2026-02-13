@@ -13,6 +13,10 @@ use std::io::Read;
 use std::net::TcpStream;
 use std::time::Duration;
 
+/// SSH-based remote session for probing Linux hosts.
+///
+/// Stores credentials securely and creates a new TCP+SSH connection
+/// for each command invocation (no persistent channel reuse).
 pub struct LinuxRemoteSession {
     server_name: String,
     username: String,
