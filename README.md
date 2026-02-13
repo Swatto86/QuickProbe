@@ -21,6 +21,7 @@ QuickProbe lets you check server health, launch RDP sessions, and manage your fl
 - **Active Directory scanning** — Discover servers via LDAP
 - **Secure credentials** — Stored in Windows Credential Manager (DPAPI)
 - **Local-first** — SQLite database, no cloud required
+- **Local mode** — Operate without domain credentials for lab/workgroup environments
 - **Encrypted backups** — AES-256 encrypted ZIP export/import
 
 ## Quick Start
@@ -30,6 +31,18 @@ QuickProbe lets you check server health, launch RDP sessions, and manage your fl
 3. **Login** — enter your domain credentials (`DOMAIN\username`)
 4. **Add servers** — manually or scan your Active Directory
 5. **Monitor** — click Refresh and double-click any card to RDP
+
+### Local Mode (non-domain machines)
+
+If your machine is **not joined to a domain** (e.g. a Hyper-V lab environment), enable **Local Mode**:
+
+1. Toggle **Local Mode** on the login screen
+2. Enter the local admin credentials for your target VMs (e.g. `Administrator`)
+3. Login will skip domain validation (format check only) and go straight to the dashboard
+4. A **Local Mode** badge appears on the dashboard header
+5. AD scan is disabled — add hosts manually
+
+> All other features (RDP, WinRM, SSH, credential storage) work identically in local mode.
 
 ## Using QuickProbe
 

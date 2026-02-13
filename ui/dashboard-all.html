@@ -94,7 +94,11 @@
                 <div class="flex justify-between items-center flex-wrap gap-4">
                     <div class="flex items-start gap-4 flex-wrap">
                         <div class="flex flex-col gap-1">
-                            <h1 class="text-3xl font-bold text-primary">QuickProbe</h1>
+                            <div class="flex items-center gap-2">
+                                <h1 class="text-3xl font-bold text-primary">QuickProbe</h1>
+                                <span id="local-mode-badge" class="badge badge-warning badge-lg hidden">Local
+                                    Mode</span>
+                            </div>
                         </div>
                         <div class="join" role="group" aria-label="Switch dashboard view">
                             <button class="join-item btn btn-sm view-btn" data-view="cards" type="button">Cards</button>
@@ -1612,6 +1616,23 @@
             }
         }
 
+        /// Show or hide the "Local Mode" badge in the dashboard header.
+        async function hydrateLoginModeBadge() {
+            const badge = document.getElementById('local-mode-badge');
+            if (!badge) return;
+            try {
+                const mode = await window.__TAURI__.core.invoke('get_login_mode');
+                if (mode === 'local') {
+                    badge.classList.remove('hidden');
+                } else {
+                    badge.classList.add('hidden');
+                }
+            } catch (err) {
+                console.warn('Failed to load login mode', err);
+                badge.classList.add('hidden');
+            }
+        }
+
         function hydrateHostViewMode() {
             const raw = settingsBundle?.qp_host_view_mode;
             if (raw === 'cards' || raw === 'groups') {
@@ -2375,6 +2396,7 @@
                 persistedHealthMap = healthResult.healthMap || new Map();
                 hydrateSettings();
                 await hydrateRuntimeMode();
+                await hydrateLoginModeBadge();
                 if (window.__TAURI__) {
                     try {
                         const status = await window.__TAURI__.core.invoke('debug_local_store_status');

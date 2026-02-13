@@ -29,7 +29,7 @@ use quickprobe::{
     platform::{
         LinuxRemoteSession, WindowsCredentialManager, WindowsRegistry, WindowsRemoteSession,
     },
-    validate_credentials, CredentialStore,
+    validate_credentials, validate_credentials_basic, CredentialStore,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -131,6 +131,8 @@ struct LoginResponse {
 struct CredentialsCheckResponse {
     has_credentials: bool,
     username: Option<String>,
+    /// `"domain"`, `"local"`, or `"none"`.
+    login_mode: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -1096,6 +1098,30 @@ async fn run_bounded_credential_validation(
     }
 }
 
+// ---------------------------------------------------------------------------
+// Login mode helpers
+// ---------------------------------------------------------------------------
+
+/// Persist the current login mode (`"domain"` or `"local"`) in the KV store.
+fn set_login_mode(mode: &str) -> Result<(), String> {
+    kv_set_value(KV_LOGIN_MODE, mode)
+}
+
+/// Read the persisted login mode. Returns `"none"` when no mode has been set.
+fn read_login_mode() -> String {
+    kv_get_value(KV_LOGIN_MODE)
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| "none".to_string())
+}
+
+/// Clear the persisted login mode (called on logout).
+fn clear_login_mode() -> Result<(), String> {
+    // Writing an empty value effectively resets; read_login_mode treats missing as "none".
+    // Use kv_set with "none" for consistency.
+    kv_set_value(KV_LOGIN_MODE, "none")
+}
+
 /// Login command - validates credentials and saves to Windows Credential Manager
 #[tauri::command]
 async fn login(username: String, password: String) -> Result<LoginResponse, String> {
@@ -1127,6 +1153,9 @@ async fn login(username: String, password: String) -> Result<LoginResponse, Stri
                 });
             }
 
+            // Mark this as a domain login
+            let _ = set_login_mode("domain");
+
             // Credentials changed — flush the session cache so all servers
             // pick up the new credentials on next probe cycle.
             clear_session_cache().await;
@@ -1143,6 +1172,60 @@ async fn login(username: String, password: String) -> Result<LoginResponse, Stri
     }
 }
 
+/// Local-mode login — validates format only, no domain controller required.
+///
+/// Stores credentials in Windows Credential Manager and marks the session as
+/// "local" in the KV store. This allows non-domain-joined machines to use
+/// QuickProbe with per-host or workgroup credentials.
+#[tauri::command]
+async fn login_local_mode(username: String, password: String) -> Result<LoginResponse, String> {
+    // Validate format only (non-empty username + password)
+    let username = match validate_credentials_basic(&username, &password) {
+        Ok(u) => u,
+        Err(e) => {
+            return Ok(LoginResponse {
+                success: false,
+                error: Some(format!("Invalid credentials: {}", e)),
+            });
+        }
+    };
+
+    let credentials = Credentials::new(username, SecureString::new(password));
+
+    // Store without domain validation
+    let credential_store = WindowsCredentialManager::new();
+    let profile = CredentialProfile::default();
+
+    if let Err(e) = credential_store.store(&profile, &credentials).await {
+        return Ok(LoginResponse {
+            success: false,
+            error: Some(format!("Failed to save credentials: {}", e)),
+        });
+    }
+
+    // Mark this as a local-mode login
+    set_login_mode("local")?;
+
+    // Flush the session cache so all servers pick up new credentials.
+    clear_session_cache().await;
+
+    logger::log_info(&format!(
+        "login_local_mode: stored credentials for user '{}'",
+        credentials.username().as_str()
+    ));
+
+    Ok(LoginResponse {
+        success: true,
+        error: None,
+    })
+}
+
+/// Returns the current login mode: `"domain"`, `"local"`, or `"none"`.
+#[tauri::command]
+fn get_login_mode() -> Result<String, String> {
+    Ok(read_login_mode())
+}
+
 /// Logout command - deletes credentials from Windows Credential Manager
 #[tauri::command]
 async fn logout(app: tauri::AppHandle) -> Result<(), String> {
@@ -1153,6 +1236,9 @@ async fn logout(app: tauri::AppHandle) -> Result<(), String> {
         .delete(&profile)
         .await
         .map_err(|e| format!("Failed to delete credentials: {}", e))?;
+
+    // Clear login mode so the next session starts fresh.
+    let _ = clear_login_mode();
 
     // Credentials removed — flush the session cache.
     clear_session_cache().await;
@@ -1184,15 +1270,18 @@ fn has_saved_credentials_sync() -> Result<bool, String> {
 async fn check_saved_credentials() -> Result<CredentialsCheckResponse, String> {
     let credential_store = WindowsCredentialManager::new();
     let profile = CredentialProfile::default();
+    let mode = read_login_mode();
 
     match credential_store.retrieve(&profile).await {
         Ok(Some(credentials)) => Ok(CredentialsCheckResponse {
             has_credentials: true,
             username: Some(credentials.username().as_str().to_string()),
+            login_mode: mode,
         }),
         Ok(None) => Ok(CredentialsCheckResponse {
             has_credentials: false,
             username: None,
+            login_mode: "none".to_string(),
         }),
         Err(e) => Err(format!("Failed to check credentials: {}", e)),
     }
@@ -6173,6 +6262,61 @@ mod tests {
             Ok(())
         });
     }
+
+    // ── Login-mode KV helpers ────────────────────────────────────────
+
+    #[test]
+    fn login_mode_defaults_to_none() {
+        with_temp_appdata(|| {
+            let mode = read_login_mode();
+            assert_eq!(mode, "none");
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn set_and_read_login_mode_domain() {
+        with_temp_appdata(|| {
+            set_login_mode("domain")?;
+            assert_eq!(read_login_mode(), "domain");
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn set_and_read_login_mode_local() {
+        with_temp_appdata(|| {
+            set_login_mode("local")?;
+            assert_eq!(read_login_mode(), "local");
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn clear_login_mode_resets_to_none() {
+        with_temp_appdata(|| {
+            set_login_mode("local")?;
+            assert_eq!(read_login_mode(), "local");
+            clear_login_mode()?;
+            assert_eq!(read_login_mode(), "none");
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn login_mode_survives_multiple_changes() {
+        with_temp_appdata(|| {
+            set_login_mode("domain")?;
+            assert_eq!(read_login_mode(), "domain");
+            set_login_mode("local")?;
+            assert_eq!(read_login_mode(), "local");
+            clear_login_mode()?;
+            assert_eq!(read_login_mode(), "none");
+            set_login_mode("domain")?;
+            assert_eq!(read_login_mode(), "domain");
+            Ok(())
+        });
+    }
 }
 
 /// Format a domain like "contoso.com" into "DC=contoso,DC=com"
@@ -6757,6 +6901,8 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             login,
+            login_local_mode,
+            get_login_mode,
             logout,
             check_saved_credentials,
             login_with_saved_credentials,
