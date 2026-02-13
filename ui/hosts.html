@@ -915,6 +915,19 @@
 
                 document.getElementById('delete-all-hosts').addEventListener('click', openDeleteAllModal);
                 document.getElementById('scan-ad').addEventListener('click', openScanModal);
+
+                // Disable AD scan in local mode (no domain controller available)
+                try {
+                    const loginMode = await window.__TAURI__.core.invoke('get_login_mode');
+                    if (loginMode === 'local') {
+                        const scanBtn = document.getElementById('scan-ad');
+                        scanBtn.disabled = true;
+                        scanBtn.classList.add('btn-disabled');
+                        scanBtn.title = 'AD scan is unavailable in Local Mode';
+                    }
+                } catch (err) {
+                    console.warn('Failed to check login mode for AD scan', err);
+                }
                 document.getElementById('check-status-all').addEventListener('click', checkAllHostsStatus);
                 document.getElementById('cancel-edit').addEventListener('click', () => cancelEdit());
                 document.getElementById('host-form').addEventListener('submit', onSubmit);

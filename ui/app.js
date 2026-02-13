@@ -19,6 +19,7 @@ const countdownMessage = document.getElementById('countdown-message');
 const countdownSeconds = document.getElementById('countdown-seconds');
 const usernameInput = document.getElementById('username');
 const passwordInput = document.getElementById('password');
+const localModeToggle = document.getElementById('local-mode-toggle');
 
 function disableAutocompleteAll() {
     document.querySelectorAll('input, textarea').forEach((el) => {
@@ -219,6 +220,11 @@ async function initialize(skipTimer = false) {
             // Pre-fill username
             usernameInput.value = result.username || '';
             
+            // Restore local-mode toggle state from saved login mode
+            if (localModeToggle && result.login_mode === 'local') {
+                localModeToggle.checked = true;
+            }
+            
             // Show saved password indicator using readonly + descriptive text
             passwordInput.value = '(saved credentials)';
             passwordInput.setAttribute('readonly', 'readonly');
@@ -347,7 +353,10 @@ loginForm.addEventListener('submit', async (e) => {
     showView(validatingView);
     
     try {
-        const result = await invoke('login', {
+        // Choose login command based on local-mode toggle
+        const useLocalMode = localModeToggle && localModeToggle.checked;
+        const command = useLocalMode ? 'login_local_mode' : 'login';
+        const result = await invoke(command, {
             username,
             password
         });

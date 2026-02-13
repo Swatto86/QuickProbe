@@ -102,6 +102,13 @@ pub const KV_SCOPE_TYPE: &str = "global";
 /// - Pre-restore snapshots
 pub const KV_SCOPE_ID: &str = "default";
 
+/// KV key that records the current login mode.
+///
+/// Values: `"domain"` (credentials validated against a DC) or `"local"`
+/// (format-only validation for non-domain-joined machines).
+/// Cleared on logout so the next session starts fresh.
+pub const KV_LOGIN_MODE: &str = "qp_login_mode";
+
 // ============================================================================
 // Security / Validation
 // ============================================================================

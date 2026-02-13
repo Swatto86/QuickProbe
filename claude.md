@@ -19,6 +19,7 @@ one-click RDP, service/process management, and encrypted backup/restore — all 
 | **Probe / Heartbeat** | A periodic or on-demand health interrogation (CPU, RAM, disk, services, etc.). |
 | **Session** | A cached `WindowsRemoteSession` or `LinuxRemoteSession` handle (5-min TTL). |
 | **Credential Profile** | A named credential entry — either the global login or a per-host override — stored in Windows Credential Manager (DPAPI). |
+| **Login Mode** | Either "domain" (default — full `PrincipalContext` validation against a domain controller) or "local" (format-only validation, no DC required). Tracked in the KV store via `qp_login_mode`. |
 | **Backup Payload** | A schema-versioned, AES-256-encrypted ZIP containing hosts, KV settings, and runtime mode metadata. |
 | **KV Store** | SQLite-backed key-value persistence for dashboard settings, server order, and cached state. |
 
@@ -32,7 +33,7 @@ one-click RDP, service/process management, and encrypted backup/restore — all 
 │  Communicates with backend via Tauri IPC commands         │
 ├──────────────────────────────────────────────────────────┤
 │  Tauri Shell (src-tauri/src/main.rs)                     │
-│  55 IPC command handlers, session pool, backup/restore   │
+│  57 IPC command handlers, session pool, backup/restore   │
 ├──────────────────────────────────────────────────────────┤
 │  Core Logic (src-tauri/src/core/)  — platform-agnostic   │
 │  session.rs trait, probes.rs, credential.rs, validation  │
@@ -138,13 +139,13 @@ QuickProbe/
 ### Rust crate (`quickprobe`)
 
 - **`lib.rs`** — public crate root; re-exports `core::*`, `models::*`, `utils::*`.
-- **`main.rs`** — Tauri binary crate; registers 55 `#[tauri::command]` IPC handlers.
+- **`main.rs`** — Tauri binary crate; registers 57 `#[tauri::command]` IPC handlers.
 
 ### Key Tauri IPC Commands (frontend → backend)
 
 | Category | Commands |
 |---|---|
-| **Auth** | `login`, `logout`, `check_saved_credentials`, `login_with_saved_credentials` |
+| **Auth** | `login`, `login_local_mode`, `logout`, `check_saved_credentials`, `login_with_saved_credentials`, `get_login_mode` |
 | **Hosts** | `get_hosts`, `set_hosts`, `update_host`, `save_server_notes`, `rename_group` |
 | **Probes** | `get_system_health`, `cache_get_dashboard`, `cache_set_dashboard`, `persist_health_snapshot`, `load_health_snapshots` |
 | **Remote actions** | `launch_rdp`, `launch_ssh`, `open_explorer_share`, `launch_remote_registry`, `remote_restart`, `remote_shutdown` |
@@ -214,3 +215,5 @@ QuickProbe/
 9. **Database operations use immediate transactions.** No read-modify-write patterns that could race.
 
 10. **Backups are always AES-256 encrypted.** Plaintext export is not supported.
+
+11. **Local mode skips domain validation only.** `login_local_mode` uses `validate_credentials_basic` (format check). Credentials are still stored in DPAPI and `execute_remote()` still uses `New-PSSession -Credential`. AD-dependent features (Scan AD) are disabled in the UI when `get_login_mode` returns `"local"`.
