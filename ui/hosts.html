@@ -224,12 +224,12 @@
         <dialog id="scan-modal" class="modal">
             <div class="modal-box max-w-2xl">
                 <h3 class="font-bold text-lg">Scan Active Directory</h3>
-                <p class="py-3 text-base-content/80">Find Windows Server computers via LDAP (no PowerShell) and merge
+                <p class="py-3 text-base-content/80">Find Windows computers via LDAP (no PowerShell) and merge
                     them into your host list.</p>
                 <div class="text-sm mb-4">
                     <div class="font-semibold mb-2">What this scan does:</div>
                     <ul class="list-disc list-inside space-y-1 text-base-content/70">
-                        <li>Uses stored domain credentials over LDAP to locate Windows Server computers.</li>
+                        <li>Uses stored domain credentials over LDAP to locate Windows computers.</li>
                         <li>Adds new Windows hosts that are not already in your list.</li>
                         <li>Keeps existing notes/services/group values for matching hosts.</li>
                         <li>By default, removes Windows hosts that are no longer returned by this scan.</li>
@@ -256,8 +256,17 @@
                         <label class="label"><span class="label-text-alt text-base-content/60">Use this when scanning
                                 another domain and you only want to add hosts.</span></label>
                     </div>
-                    <div class="text-sm text-base-content/70 mb-4">Requires stored domain credentials. Uses LDAP filter
-                        for Windows Server only.</div>
+                    <div class="form-control">
+                        <label class="label cursor-pointer justify-start gap-3">
+                            <input type="checkbox" id="scan-include-clients" class="checkbox" />
+                            <span class="label-text">Include Windows client machines (not just Windows Server)</span>
+                        </label>
+                        <label class="label"><span class="label-text-alt text-base-content/60">Enable this if some
+                                systems are joined as client OS but still need monitoring (for example KMS hosts on
+                                non-server editions).</span></label>
+                    </div>
+                    <div class="text-sm text-base-content/70 mb-4">Requires stored domain credentials. Default scan
+                        targets Windows Server objects; optionally include Windows clients.</div>
                     <div class="modal-action">
                         <button type="submit" id="scan-run" class="btn btn-primary">Start Scan</button>
                         <form method="dialog"><button type="button" id="scan-cancel" class="btn">Cancel</button></form>
@@ -1097,6 +1106,8 @@
             document.getElementById('scan-dc').value = '';
             const keepBox = document.getElementById('scan-keep-existing');
             if (keepBox) keepBox.checked = false;
+            const includeClientsBox = document.getElementById('scan-include-clients');
+            if (includeClientsBox) includeClientsBox.checked = false;
             setScanBusy(false);
         }
 
@@ -1122,6 +1133,7 @@
             const domain = document.getElementById('scan-domain').value.trim();
             const dc = document.getElementById('scan-dc').value.trim();
             const keepExisting = !!document.getElementById('scan-keep-existing')?.checked;
+            const includeWindowsClients = !!document.getElementById('scan-include-clients')?.checked;
 
             if (!domain || !dc) {
                 showBanner('error', 'Domain and domain controller are required');
@@ -1141,7 +1153,7 @@
             }
 
             const start = Date.now();
-            logDebug(`hosts.html: scan_domain START domain='${domain}' dc='${dc}' skip=${keepExisting}`);
+            logDebug(`hosts.html: scan_domain START domain='${domain}' dc='${dc}' skip=${keepExisting} includeClients=${includeWindowsClients}`);
 
             setScanBusy(true);
             try {
@@ -1149,7 +1161,8 @@
                 const result = await invoke('scan_domain', {
                     domain,
                     server: dc,
-                    skipDelete: keepExisting
+                    skipDelete: keepExisting,
+                    includeWindowsClients
                 });
 
                 const elapsed = Date.now() - start;

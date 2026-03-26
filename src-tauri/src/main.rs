@@ -5568,6 +5568,42 @@ mod tests {
     }
 
     #[test]
+    fn ldap_filter_toggles_server_only_vs_all_windows() {
+        assert_eq!(
+            ldap_windows_filter(false),
+            "(&(objectClass=computer)(operatingSystem=Windows Server*))"
+        );
+        assert_eq!(
+            ldap_windows_filter(true),
+            "(&(objectClass=computer)(operatingSystem=Windows*))"
+        );
+    }
+
+    #[test]
+    fn ldap_host_identifier_prefers_dns_then_name_then_cn() {
+        let mut attrs = HashMap::new();
+        attrs.insert(
+            "dNSHostName".to_string(),
+            vec!["app1.contoso.com".to_string()],
+        );
+        attrs.insert("name".to_string(), vec!["APP1".to_string()]);
+        attrs.insert("cn".to_string(), vec!["APP1-CN".to_string()]);
+        assert_eq!(
+            ldap_host_identifier(&attrs).as_deref(),
+            Some("app1.contoso.com")
+        );
+
+        let mut attrs2 = HashMap::new();
+        attrs2.insert("name".to_string(), vec!["APP2".to_string()]);
+        attrs2.insert("cn".to_string(), vec!["APP2-CN".to_string()]);
+        assert_eq!(ldap_host_identifier(&attrs2).as_deref(), Some("APP2"));
+
+        let mut attrs3 = HashMap::new();
+        attrs3.insert("cn".to_string(), vec!["APP3-CN".to_string()]);
+        assert_eq!(ldap_host_identifier(&attrs3).as_deref(), Some("APP3-CN"));
+    }
+
+    #[test]
     fn merge_hosts_preserves_existing_and_uses_ad_description() {
         let existing = vec![
             ServerInfo {
@@ -6467,11 +6503,36 @@ fn build_bind_username(username: &str, domain: &str) -> String {
     }
 }
 
+fn ldap_windows_filter(include_windows_clients: bool) -> &'static str {
+    if include_windows_clients {
+        "(&(objectClass=computer)(operatingSystem=Windows*))"
+    } else {
+        "(&(objectClass=computer)(operatingSystem=Windows Server*))"
+    }
+}
+
+fn ldap_attr_first_nonempty(attrs: &HashMap<String, Vec<String>>, key: &str) -> Option<String> {
+    attrs.get(key).and_then(|vals| {
+        vals.iter()
+            .map(|v| v.trim())
+            .find(|v| !v.is_empty())
+            .map(|v| v.to_string())
+    })
+}
+
+fn ldap_host_identifier(attrs: &HashMap<String, Vec<String>>) -> Option<String> {
+    // Prefer FQDN, then fall back to AD computer name if DNS host is not yet populated.
+    ldap_attr_first_nonempty(attrs, "dNSHostName")
+        .or_else(|| ldap_attr_first_nonempty(attrs, "name"))
+        .or_else(|| ldap_attr_first_nonempty(attrs, "cn"))
+}
+
 async fn ldap_search_windows_servers(
     domain: &str,
     server: &str,
     username: &str,
     password: &str,
+    include_windows_clients: bool,
 ) -> Result<Vec<AdComputer>, String> {
     let base_dn = format_base_dn(domain)?;
     let url = format!("ldap://{}:389", server);
@@ -6488,8 +6549,8 @@ async fn ldap_search_windows_servers(
         .success()
         .map_err(|e| format!("LDAP bind rejected: {}", e))?;
 
-    let filter = "(&(objectClass=computer)(operatingSystem=Windows Server*)(dNSHostName=*))";
-    let attrs = vec!["dNSHostName", "description", "operatingSystem"];
+    let filter = ldap_windows_filter(include_windows_clients);
+    let attrs = vec!["dNSHostName", "name", "cn", "description", "operatingSystem"];
     let (entries, _res) = ldap
         .search(&base_dn, Scope::Subtree, filter, attrs)
         .await
@@ -6502,33 +6563,43 @@ async fn ldap_search_windows_servers(
 
     for entry in entries {
         let se = SearchEntry::construct(entry);
-        if let Some(values) = se.attrs.get("dNSHostName") {
-            if let Some(host) = values.first() {
-                let key = host.to_lowercase();
-                if !seen.insert(key) {
-                    continue;
-                }
+        let host = match ldap_host_identifier(&se.attrs) {
+            Some(h) => h,
+            None => continue,
+        };
 
-                let description = se
-                    .attrs
-                    .get("description")
-                    .and_then(|vals| vals.first())
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty());
-
-                computers.push(AdComputer {
-                    fqdn: host.to_string(),
-                    description,
-                });
-            }
+        // Deduplicate using normalized host keys so FQDN/short-name forms collapse.
+        let key = match normalize_host_name(&host) {
+            Ok(n) => n.to_lowercase(),
+            Err(_) => continue,
+        };
+        if !seen.insert(key) {
+            continue;
         }
+
+        let description = se
+            .attrs
+            .get("description")
+            .and_then(|vals| vals.first())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+
+        computers.push(AdComputer {
+            fqdn: host,
+            description,
+        });
     }
 
     ldap.unbind().await.ok();
 
     computers.sort_by(|a, b| a.fqdn.to_lowercase().cmp(&b.fqdn.to_lowercase()));
     if computers.is_empty() {
-        return Err("No Windows Server hosts found".to_string());
+        let scope = if include_windows_clients {
+            "Windows hosts"
+        } else {
+            "Windows Server hosts"
+        };
+        return Err(format!("No {} found", scope));
     }
     Ok(computers)
 }
@@ -6661,21 +6732,23 @@ fn merge_hosts(
     Ok(merged)
 }
 
-/// Scan Active Directory for Windows servers and merge into hosts.csv using LDAP (no PowerShell)
+/// Scan Active Directory for Windows hosts and merge into hosts.csv using LDAP (no PowerShell)
 #[tauri::command]
 async fn scan_domain(
     domain: Option<String>,
     server: Option<String>,
     skip_delete: Option<bool>,
+    include_windows_clients: Option<bool>,
 ) -> Result<ScanResult, String> {
     let start = SystemTime::now();
     let domain = domain.unwrap_or_default().trim().to_string();
     let server = server.unwrap_or_default().trim().to_string();
     let skip_delete = skip_delete.unwrap_or(false);
+    let include_windows_clients = include_windows_clients.unwrap_or(false);
 
     logger::log_info(&format!(
-        "scan_domain: domain='{}' dc='{}' skip_delete={}",
-        domain, server, skip_delete
+        "scan_domain: domain='{}' dc='{}' skip_delete={} include_windows_clients={}",
+        domain, server, skip_delete, include_windows_clients
     ));
 
     if domain.is_empty() {
@@ -6698,7 +6771,14 @@ async fn scan_domain(
     let username = credentials.username().as_str();
     let password = credentials.password().as_str();
 
-    let discovered = ldap_search_windows_servers(&domain, &server, username, password).await?;
+    let discovered = ldap_search_windows_servers(
+        &domain,
+        &server,
+        username,
+        password,
+        include_windows_clients,
+    )
+    .await?;
     let discovered_count = discovered.len();
     logger::log_debug(&format!("scan_domain: LDAP found {}", discovered_count));
 
