@@ -3020,6 +3020,9 @@ async fn save_rdp_credentials(
 
     // Also persist to TERMSRV for mstsc compatibility
     let _ = store.store(&rdp_profile, &creds).await;
+
+    // Ensure subsequent probes use credentials just saved by the user.
+    invalidate_session_cache(&normalized).await;
     Ok(())
 }
 
@@ -3596,19 +3599,24 @@ async fn update_host(
     let group_value = group
         .map(|g| g.trim().to_string())
         .filter(|g| !g.is_empty());
-    let os_value = os_type
-        .map(|o| o.trim().to_string())
-        .filter(|o| !o.is_empty())
-        .unwrap_or_else(|| "Windows".to_string());
-    let services_value = services
-        .map(|s| {
-            s.iter()
-                .map(|svc| svc.trim().to_string())
-                .filter(|svc| !svc.is_empty())
-                .collect::<Vec<_>>()
-                .join(";")
-        })
-        .filter(|s| !s.is_empty());
+    let os_value = normalize::normalize_os_type(os_type.as_deref());
+    let services_value = if let Some(raw_services) = services {
+        let cleaned: Vec<String> = raw_services
+            .into_iter()
+            .map(|svc| svc.trim().to_string())
+            .filter(|svc| !svc.is_empty())
+            .collect();
+        if cleaned.is_empty() {
+            None
+        } else {
+            Some(
+                normalize::normalize_services_list(&cleaned)
+                    .map_err(|e| format!("Invalid services list: {}", e))?,
+            )
+        }
+    } else {
+        None
+    };
 
     logger::log_debug(&format!(
         "update_host: '{}' notes={:?} group={:?} os={:?} services={:?}",
@@ -3671,7 +3679,11 @@ async fn set_hosts(hosts: Vec<HostUpdate>) -> Result<(), String> {
 
     let elapsed_ms = start.elapsed().unwrap_or_default().as_millis();
     match &result {
-        Ok(_) => logger::log_info(&format!("set_hosts: SUCCESS {}ms", elapsed_ms)),
+        Ok(_) => {
+            // Host definitions (including OS type) may have changed; flush WinRM cache.
+            clear_session_cache().await;
+            logger::log_info(&format!("set_hosts: SUCCESS {}ms", elapsed_ms));
+        }
         Err(e) => logger::log_error(&format!("set_hosts: FAILED {}ms: {}", elapsed_ms, e)),
     }
 
@@ -5755,6 +5767,121 @@ mod tests {
     }
 
     #[test]
+    fn update_host_normalizes_services_and_os_type() {
+        with_temp_appdata(|| {
+            let initial = vec![HostUpdate {
+                name: "app1.contoso.com".to_string(),
+                notes: Some("old".to_string()),
+                group: Some("legacy".to_string()),
+                services: Some(vec!["WINRM".to_string()]),
+                os_type: Some("Windows".to_string()),
+            }];
+            write_hosts_sqlite(&initial)?;
+
+            let rt = Runtime::new().map_err(|e| format!("rt build: {}", e))?;
+            rt.block_on(update_host(
+                "app1".to_string(),
+                Some("new note".to_string()),
+                Some("ops".to_string()),
+                Some("linux".to_string()),
+                Some(vec![
+                    " winrm ".to_string(),
+                    "dns".to_string(),
+                    "DNS".to_string(),
+                ]),
+            ))?;
+
+            let hosts = rt.block_on(get_hosts())?;
+            let app1 = hosts.iter().find(|h| h.name == "APP1").expect("app1 exists");
+            assert_eq!(app1.notes.as_deref(), Some("new note"));
+            assert_eq!(app1.group.as_deref(), Some("ops"));
+            assert_eq!(app1.os_type.as_deref(), Some("Linux"));
+            assert_eq!(
+                app1.services.as_ref().unwrap(),
+                &vec!["WINRM".to_string(), "DNS".to_string()]
+            );
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn update_host_rejects_invalid_service_names() {
+        with_temp_appdata(|| {
+            let initial = vec![HostUpdate {
+                name: "app1".to_string(),
+                notes: Some("old".to_string()),
+                group: None,
+                services: Some(vec!["WINRM".to_string()]),
+                os_type: Some("Windows".to_string()),
+            }];
+            write_hosts_sqlite(&initial)?;
+
+            let rt = Runtime::new().map_err(|e| format!("rt build: {}", e))?;
+            let err = rt
+                .block_on(update_host(
+                    "app1".to_string(),
+                    None,
+                    None,
+                    Some("windows".to_string()),
+                    Some(vec!["bad*svc".to_string()]),
+                ))
+                .expect_err("invalid service name should fail");
+            assert!(
+                err.contains("Invalid services list"),
+                "unexpected error: {}",
+                err
+            );
+
+            // Host row should remain unchanged after failed update.
+            let hosts = rt.block_on(get_hosts())?;
+            let app1 = hosts.iter().find(|h| h.name == "APP1").expect("app1 exists");
+            assert_eq!(app1.services.as_ref().unwrap(), &vec!["WINRM".to_string()]);
+            assert_eq!(app1.os_type.as_deref(), Some("Windows"));
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn set_hosts_clears_session_cache_on_success() {
+        with_temp_appdata(|| {
+            let rt = Runtime::new().map_err(|e| format!("rt build: {}", e))?;
+            rt.block_on(clear_session_cache());
+
+            let session = rt
+                .block_on(WindowsRemoteSession::connect(
+                    "APP1".to_string(),
+                    make_creds("cache-user"),
+                ))
+                .map_err(|e| format!("session build: {}", e))?;
+
+            rt.block_on(async {
+                session_pool().write().await.insert(
+                    "app1".to_string(),
+                    CachedSession {
+                        session: std::sync::Arc::new(session),
+                        created_at: SystemTime::now(),
+                    },
+                );
+            });
+
+            let before = rt.block_on(async { session_pool().read().await.len() });
+            assert_eq!(before, 1);
+
+            rt.block_on(set_hosts(vec![HostUpdate {
+                name: "app1".to_string(),
+                notes: Some("cache test".to_string()),
+                group: None,
+                services: Some(vec!["winrm".to_string()]),
+                os_type: Some("windows".to_string()),
+            }]))?;
+
+            let after = rt.block_on(async { session_pool().read().await.len() });
+            assert_eq!(after, 0);
+            Ok(())
+        });
+    }
+
+    #[test]
     fn get_hosts_allows_empty_list() {
         with_temp_appdata(|| {
             // Empty dataset should still return an empty list
@@ -6627,6 +6754,8 @@ async fn scan_domain(
     }
 
     persist_hosts(&merged)?;
+    // Scan may add/remove many hosts; clear cached sessions so probes align with new inventory.
+    clear_session_cache().await;
 
     let elapsed_ms = start.elapsed().unwrap_or_default().as_millis();
     logger::log_info(&format!(

@@ -1146,7 +1146,11 @@
             setScanBusy(true);
             try {
                 const { invoke } = window.__TAURI__.core;
-                const result = await invoke('scan_domain', { domain, server: dc, skip_delete: keepExisting });
+                const result = await invoke('scan_domain', {
+                    domain,
+                    server: dc,
+                    skipDelete: keepExisting
+                });
 
                 const elapsed = Date.now() - start;
                 closeScanModal();
