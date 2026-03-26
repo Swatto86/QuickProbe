@@ -174,7 +174,8 @@
                                 </div>
                             </div>
                             <label class="label"><span class="label-text-alt text-base-content/60">Optional grouping
-                                    label for dashboard views. A server can only belong to one group.</span></label>
+                                    label for dashboard views. A server can only belong to one group. Selecting a
+                                    group can auto-fill services from other hosts in that group.</span></label>
                         </div>
                         <div class="form-control">
                             <label class="label" for="host-os"><span class="label-text">Host OS</span></label>
@@ -394,6 +395,7 @@
         let deleteBusy = false;
         let editDirty = false;
         let lastSaveSnapshot = '';
+        let lastAutoGroupServicesSignature = '';
 
         // Service browser state
         let serviceBrowserData = [];           // All services fetched from remote host
@@ -440,13 +442,81 @@
 
         const ADD_NEW_GROUP_VALUE = '__add_new__';
 
-        function getUniqueGroups() {
-            const groups = new Set();
-            hosts.forEach(h => {
-                const group = (h.box || '').trim();
-                if (group) groups.add(group);
+        function normalizeGroupKey(value) {
+            return (value || '').trim().toLowerCase();
+        }
+
+        function getServicesSignature(services) {
+            return (services || [])
+                .map(s => (s || '').trim().toLowerCase())
+                .filter(Boolean)
+                .join(';');
+        }
+
+        function resetAutoGroupTemplateState() {
+            lastAutoGroupServicesSignature = '';
+        }
+
+        function getGroupTemplateServices(groupName) {
+            const targetGroupKey = normalizeGroupKey(groupName);
+            if (!targetGroupKey) return [];
+
+            const seen = new Set();
+            const template = [];
+
+            hosts.forEach((host) => {
+                if (normalizeGroupKey(host.box) !== targetGroupKey) return;
+
+                const hostServices = Array.isArray(host.services) ? host.services : [];
+                hostServices.forEach((rawSvc) => {
+                    const svc = (rawSvc || '').trim();
+                    const key = svc.toLowerCase();
+                    if (!key || seen.has(key)) return;
+                    seen.add(key);
+                    template.push(svc);
+                });
             });
-            return Array.from(groups).sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
+
+            return template;
+        }
+
+        function applySelectedGroupTemplate(groupName = null) {
+            const selectedGroup = (groupName ?? getSelectedGroup() ?? '').trim();
+            if (!selectedGroup) return;
+
+            const textarea = document.getElementById('host-services');
+            if (!textarea) return;
+
+            const templateServices = getGroupTemplateServices(selectedGroup);
+            if (!templateServices.length) return;
+
+            const currentServices = parseServicesText(textarea.value);
+            const currentSignature = getServicesSignature(currentServices);
+            const shouldReplace = !currentServices.length
+                || (lastAutoGroupServicesSignature && currentSignature === lastAutoGroupServicesSignature);
+
+            const nextServices = shouldReplace
+                ? templateServices
+                : mergeServices(currentServices, templateServices);
+            const nextSignature = getServicesSignature(nextServices);
+
+            if (nextSignature !== currentSignature) {
+                textarea.value = nextServices.join('; ');
+                markFormDirty();
+            }
+
+            lastAutoGroupServicesSignature = nextSignature;
+        }
+
+        function getUniqueGroups() {
+            const groupsByKey = new Map();
+            hosts.forEach((h) => {
+                const group = (h.box || '').trim();
+                const groupKey = normalizeGroupKey(group);
+                if (!groupKey || groupsByKey.has(groupKey)) return;
+                groupsByKey.set(groupKey, group);
+            });
+            return Array.from(groupsByKey.values()).sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
         }
 
         function populateGroupDropdown(selectedValue = '') {
@@ -454,7 +524,12 @@
             if (!select) return;
 
             const groups = getUniqueGroups();
-            const currentValue = selectedValue || '';
+            const groupsByKey = new Map(groups.map(g => [normalizeGroupKey(g), g]));
+            const requestedValue = (selectedValue || '').trim();
+            const requestedKey = normalizeGroupKey(requestedValue);
+            const currentValue = requestedKey && groupsByKey.has(requestedKey)
+                ? groupsByKey.get(requestedKey)
+                : requestedValue;
 
             select.innerHTML = '';
 
@@ -485,7 +560,7 @@
 
             // Set selected value
             // If the current value isn't in the list (new group), add it
-            if (currentValue && !groups.includes(currentValue)) {
+            if (currentValue && !groupsByKey.has(normalizeGroupKey(currentValue))) {
                 const customOpt = document.createElement('option');
                 customOpt.value = currentValue;
                 customOpt.textContent = currentValue;
@@ -524,6 +599,7 @@
             // Add new group to dropdown and select it
             populateGroupDropdown(newGroup);
             hideNewGroupInput();
+            applySelectedGroupTemplate(newGroup);
             markFormDirty();
         }
 
@@ -537,6 +613,7 @@
                     if (select.value === ADD_NEW_GROUP_VALUE) {
                         showNewGroupInput();
                     } else {
+                        applySelectedGroupTemplate(select.value);
                         markFormDirty();
                     }
                 });
@@ -1323,6 +1400,7 @@
             editingName = name ? normalizeHostName(name) : null;
             const title = document.getElementById('form-title');
             hideNewGroupInput();
+            resetAutoGroupTemplateState();
             if (!name) {
                 title.textContent = 'Add Host';
                 document.getElementById('host-name').value = '';
@@ -1707,12 +1785,20 @@
             const textarea = document.getElementById('host-services');
             if (!textarea) return;
             if (!template.services.length) {
-                textarea.value = '';
+                if (textarea.value) {
+                    textarea.value = '';
+                    markFormDirty();
+                }
                 return;
             }
             const current = parseServicesText(textarea.value);
             const merged = mergeServices(current, template.services);
-            textarea.value = merged.join('; ');
+            const currentSignature = getServicesSignature(current);
+            const mergedSignature = getServicesSignature(merged);
+            if (mergedSignature !== currentSignature) {
+                textarea.value = merged.join('; ');
+                markFormDirty();
+            }
         }
 
         function parseServicesText(value) {
