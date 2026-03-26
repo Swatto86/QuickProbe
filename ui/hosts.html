@@ -836,7 +836,11 @@
         }
 
         function markHostsChanged() {
-            settingsBundle.qp_hosts_changed = Date.now().toString();
+            const stamp = Date.now().toString();
+            settingsBundle.qp_hosts_changed = stamp;
+            try {
+                localStorage.setItem(HOSTS_CHANGED_KEY, JSON.stringify(stamp));
+            } catch (_) { /* ignore */ }
             queueSettingsSave(settingsPayload());
         }
 

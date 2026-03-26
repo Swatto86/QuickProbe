@@ -958,6 +958,7 @@
         let runtimeModeInfo = null;
         let lastRefreshStatus = null;
         let displayAllServersDebounceTimer = null;
+        let loadAllServersRunId = 0;
 
         function defaultSettings() {
             return {
@@ -1722,9 +1723,27 @@
             }
         }
 
+        function markHostsChanged() {
+            const stamp = Date.now().toString();
+            settingsBundle.qp_hosts_changed = stamp;
+            try {
+                localStorage.setItem(HOSTS_CHANGED_KEY, JSON.stringify(stamp));
+            } catch (_) { /* ignore */ }
+            queueSettingsSave(settingsPayload());
+        }
+
         function consumeHostsChangedFlag() {
-            const flag = settingsBundle?.qp_hosts_changed;
+            let flag = settingsBundle?.qp_hosts_changed;
+            if (!flag) {
+                try {
+                    const raw = localStorage.getItem(HOSTS_CHANGED_KEY);
+                    if (raw) flag = JSON.parse(raw);
+                } catch (_) { /* ignore */ }
+            }
             settingsBundle.qp_hosts_changed = null;
+            try {
+                localStorage.removeItem(HOSTS_CHANGED_KEY);
+            } catch (_) { /* ignore */ }
             if (flag) {
                 queueSettingsSave(settingsPayload());
                 return true;
@@ -2420,7 +2439,7 @@
 
                 // Listen for storage events (cross-tab communication)
                 window.addEventListener('storage', async (e) => {
-                    if (e.key === SETTINGS_KEY) {
+                    if (e.key === SETTINGS_KEY || e.key === HOSTS_CHANGED_KEY) {
                         try {
                             // Theme is handled by ThemeModule, but we still need to:
                             // - Reload from backend for full sync
@@ -2565,11 +2584,13 @@
 
                 const latestHosts = await fetchNormalizedHosts();
                 const latestSignature = latestHosts.signature || computeHostsSignature(latestHosts.hosts);
-                const signatureMatches = previousSignature && latestSignature && latestSignature === previousSignature;
+                const signatureMismatch = Boolean(
+                    previousSignature && latestSignature && latestSignature !== previousSignature
+                );
 
-                // If hosts were changed in the CRUD window, we need to rebuild from latest host list
-                // but preserve snapshot data for unchanged hosts
-                if (hostsChanged) {
+                // Rebuild from latest host list when explicitly flagged or when signature drift is detected.
+                // This prevents stale card metadata when the host-change flag is missed/delayed.
+                if (hostsChanged || signatureMismatch) {
                     hostsSignature = latestSignature;
 
                     // Build fresh server list from current hosts
@@ -4065,8 +4086,9 @@
             const silent = options.silent === true;
             const preloadedHosts = options.preloadedHosts;
             const quickOnly = options.quickOnly === true;
+            const runId = ++loadAllServersRunId;
 
-            logDebug(`dashboard:loadAllServers START silent=${silent} quickOnly=${quickOnly}`);
+            logDebug(`dashboard:loadAllServers START run=${runId} silent=${silent} quickOnly=${quickOnly}`);
 
             if (!window.__TAURI__) {
                 showError('Tauri API not available. Run with "cargo tauri dev"');
@@ -4088,6 +4110,10 @@
                 const hostsResult = preloadedHosts && Array.isArray(preloadedHosts.hosts)
                     ? preloadedHosts
                     : await fetchNormalizedHosts();
+                if (runId !== loadAllServersRunId) {
+                    logDebug(`dashboard:loadAllServers ABORT run=${runId} superseded after host fetch`);
+                    return;
+                }
                 const hosts = hostsResult.hosts || [];
                 hostsSignature = hostsResult.signature || computeHostsSignature(hosts);
                 const order = parseServerOrder();
@@ -4125,6 +4151,10 @@
                 ).map(server => applyLocationToServer(server, false));
                 // Apply persisted health from database only for servers without existing data
                 const serversWithHealth = mergeHealthIntoServers(baseServers, persistedHealthMap);
+                if (runId !== loadAllServersRunId) {
+                    logDebug(`dashboard:loadAllServers ABORT run=${runId} superseded before base apply`);
+                    return;
+                }
                 serversData = serversWithHealth;
                 cacheDashboardData();
                 displayAllServers();
@@ -4155,12 +4185,16 @@
                 logDebug(`dashboard:loadAllServers PROBING ${hosts.length} hosts concurrency=${MAX_CONCURRENT_PROBES}`);
 
                 // Query each server with bounded concurrency to avoid WinRM connection storms
-                serversData = await mapWithConcurrency(
+                const probedServers = await mapWithConcurrency(
                     hosts,
                     MAX_CONCURRENT_PROBES,
                     (serverInfo) => hydrateServerWithHealth(serverInfo, invoke)
                 );
-                serversData = applyOrder(serversData, order);
+                if (runId !== loadAllServersRunId) {
+                    logDebug(`dashboard:loadAllServers ABORT run=${runId} superseded after probe`);
+                    return;
+                }
+                serversData = applyOrder(probedServers, order);
                 cacheDashboardData();
                 displayAllServers();
                 startHeartbeatLoop(heartbeatHosts);
@@ -4174,6 +4208,9 @@
                     setLastRefreshStatus('ok', 'Hosts refreshed');
                 }
             } catch (error) {
+                if (runId !== loadAllServersRunId) {
+                    return;
+                }
                 const elapsed = Date.now() - start;
                 console.error('Failed to load servers', error);
                 logDebug(`dashboard:loadAllServers FAILED ${elapsed}ms: ${error}`);
@@ -4622,7 +4659,7 @@
 
                 focusedGroup = trimmedNew;
                 settingsBundle.qp_focused_group = focusedGroup;
-                queueSettingsSave(settingsPayload());
+                markHostsChanged();
                 cacheDashboardData();
                 displayAllServers();
                 if (typeof showInfo === 'function') {
@@ -6340,12 +6377,13 @@
                         notes: result.notes
                     };
                 });
+                markHostsChanged();
                 cacheDashboardData();
                 displayAllServers();
                 showInfo('Notes saved');
 
                 // Also kick off a background refresh to keep cache consistent
-                loadAllServers({ silent: true });
+                loadAllServers({ silent: true, quickOnly: true });
             } catch (error) {
                 showError('Failed to save notes: ' + error);
                 // Rollback on error
@@ -6393,6 +6431,7 @@
                 // Update local caches
                 serversData = serversData.filter(s => s.name !== serverName);
                 hostsByName.delete(serverName);
+                markHostsChanged();
 
                 // Remove the card from DOM without refreshing the entire view
                 const cardToRemove = document.querySelector(`.server-card[data-server="${serverName}"]`);
@@ -6410,6 +6449,12 @@
                 const summary = Utils.summarize(serversData);
                 updateSummaryCards(summary);
 
+                heartbeatHosts = (heartbeatHosts || []).filter((host) => {
+                    const hostName = normalizeHostName(host?.name || '');
+                    return hostName && hostName !== normalizeHostName(serverName);
+                });
+                stopHeartbeatLoop();
+                startHeartbeatLoop(heartbeatHosts);
                 cacheDashboardData();
                 showInfo(`Host "${serverName}" deleted`);
 
@@ -6535,12 +6580,13 @@
                     });
                 }
 
+                markHostsChanged();
                 cacheDashboardData();
                 displayAllServers();
                 showInfo('Host updated');
 
                 // Also kick off a background refresh to keep cache consistent
-                loadAllServers({ silent: true });
+                loadAllServers({ silent: true, quickOnly: true });
             } catch (error) {
                 showError('Failed to update host: ' + error);
                 // Rollback on error
