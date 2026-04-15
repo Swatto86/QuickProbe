@@ -8,8 +8,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::io::{BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
-use zip::unstable::write::FileOptionsExt;
-use zip::{write::FileOptions, CompressionMethod, ZipArchive, ZipWriter};
+use zip::{write::SimpleFileOptions, AesMode, CompressionMethod, ZipArchive, ZipWriter};
 
 use super::helpers::*;
 use super::hosts::*;
@@ -197,13 +196,9 @@ pub(crate) fn write_encrypted_backup(
     let writer = BufWriter::new(file);
     let mut zip = ZipWriter::new(writer);
 
-    // TODO: Upgrade to AES-256 encryption for better security
-    // Current zip crate version (0.6.6) doesn't expose AES encryption API for writing.
-    // Consider upgrading to zip 0.7+ or using a different encryption method.
-    // For now, using deprecated ZIP encryption which provides basic password protection.
-    let options = FileOptions::default()
+    let options = SimpleFileOptions::default()
         .compression_method(CompressionMethod::Deflated)
-        .with_deprecated_encryption(password.as_bytes());
+        .with_aes_encryption(AesMode::Aes256, password);
 
     let manifest = backup::build_backup_manifest(env!("CARGO_PKG_VERSION"), current_epoch_ms());
 
@@ -236,23 +231,22 @@ fn try_read_zip_entry(
     name: &str,
     password: &str,
 ) -> Result<Option<String>, String> {
-    let file = match archive.by_name_decrypt(name, password.as_bytes()) {
-        Ok(inner) => inner,
+    let mut file = match archive.by_name_decrypt(name, password.as_bytes()) {
+        Ok(f) => f,
         Err(zip::result::ZipError::FileNotFound) => return Ok(None),
+        Err(zip::result::ZipError::InvalidPassword) => {
+            return Err(format!(
+                "Failed to decrypt {}: invalid password. Please verify your password is correct.",
+                name
+            ));
+        }
         Err(e) => {
             return Err(format!(
-                "Failed to open {}: {}. This may indicate an invalid password or corrupted file.",
+                "Failed to open {}: {}. This may indicate a corrupted file.",
                 name, e
             ));
         }
     };
-    let mut file = file.map_err(|e| {
-        // Decryption errors often indicate wrong password
-        format!(
-            "Failed to decrypt {}: {}. Please verify your password is correct.",
-            name, e
-        )
-    })?;
     let mut contents = String::new();
     file.read_to_string(&mut contents)
         .map_err(|e| format!("Failed to read {}: {}", name, e))?;
