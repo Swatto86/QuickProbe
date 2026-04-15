@@ -1,5 +1,6 @@
 //! CSV export commands.
 
+use quickprobe::core::SystemHealthSummary;
 use quickprobe::db;
 use std::fs;
 use std::io::{BufWriter, Write};
@@ -114,201 +115,16 @@ pub(crate) async fn export_hosts_csv(destination: String) -> Result<String, Stri
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Extracts structured health data fields from JSON for CSV export.
+/// Extract comprehensive health data for CSV export — typed deserialization.
 ///
-/// ## Purpose
-///
-/// Parses the health snapshot JSON (from `persist_health_snapshot`) and extracts
-/// specific fields needed for CSV export via `export_hosts_csv`. This bridges the
-/// JSON storage format with the tabular CSV format users request.
-#[allow(dead_code)] // Kept for backward compatibility, superseded by extract_health_fields_comprehensive
-#[allow(clippy::type_complexity)] // Complex tuple return type, but function is deprecated
-pub(crate) fn extract_health_fields(
-    health_json: &str,
-    timestamp: &str,
-) -> (
-    String,
-    String,
-    String,
-    String,
-    String,
-    String,
-    String,
-    String,
-    String,
-    String,
-    String,
-    String,
-    String,
-    String,
-    String,
-) {
-    let health: serde_json::Value = match serde_json::from_str(health_json) {
-        Ok(v) => v,
-        Err(_) => {
-            return (
-                String::new(),
-                String::new(),
-                String::new(),
-                String::new(),
-                String::new(),
-                String::new(),
-                String::new(),
-                String::new(),
-                String::new(),
-                String::new(),
-                String::new(),
-                String::new(),
-                String::new(),
-                String::new(),
-                String::new(),
-            )
-        }
-    };
-
-    // Extract IP addresses from net_adapters
-    let mut ipv4_addresses = Vec::new();
-    let mut ipv6_addresses = Vec::new();
-    if let Some(adapters) = health.get("net_adapters").and_then(|a| a.as_array()) {
-        for adapter in adapters {
-            if let Some(ipv4_arr) = adapter.get("ipv4").and_then(|a| a.as_array()) {
-                for ip in ipv4_arr {
-                    if let Some(ip_str) = ip.as_str() {
-                        ipv4_addresses.push(ip_str.to_string());
-                    }
-                }
-            }
-            if let Some(ipv6_arr) = adapter.get("ipv6").and_then(|a| a.as_array()) {
-                for ip in ipv6_arr {
-                    if let Some(ip_str) = ip.as_str() {
-                        ipv6_addresses.push(ip_str.to_string());
-                    }
-                }
-            }
-        }
-    }
-
-    // Extract OS info
-    let os_version = health
-        .get("os_info")
-        .and_then(|o| o.get("os_version"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
-
-    let build_number = health
-        .get("os_info")
-        .and_then(|o| o.get("build_number"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
-
-    // Extract memory info
-    let total_memory_mb = health
-        .get("total_memory_mb")
-        .and_then(|v| v.as_f64())
-        .map(|v| format!("{:.2}", v))
-        .unwrap_or_default();
-
-    let used_memory_mb = health
-        .get("used_memory_mb")
-        .and_then(|v| v.as_f64())
-        .map(|v| format!("{:.2}", v))
-        .unwrap_or_default();
-
-    let memory_used_percent = health
-        .get("memory_used_percent")
-        .and_then(|v| v.as_f64())
-        .map(|v| format!("{:.2}", v))
-        .unwrap_or_default();
-
-    // Extract uptime info
-    let uptime_hours = health
-        .get("uptime")
-        .and_then(|u| u.get("uptime_hours"))
-        .and_then(|v| v.as_f64())
-        .map(|v| format!("{:.2}", v))
-        .unwrap_or_default();
-
-    // Extract reachability info
-    let ping_ok = health
-        .get("reachability")
-        .and_then(|r| r.get("ping_ok"))
-        .and_then(|v| v.as_bool())
-        .map(|v| if v { "true" } else { "false" })
-        .unwrap_or("")
-        .to_string();
-
-    let tcp_ports_status = if let Some(ports) = health
-        .get("reachability")
-        .and_then(|r| r.get("tcp_ports"))
-        .and_then(|p| p.as_array())
-    {
-        let port_statuses: Vec<String> = ports
-            .iter()
-            .filter_map(|p| {
-                let port = p.get("port").and_then(|v| v.as_u64())?;
-                let ok = p.get("ok").and_then(|v| v.as_bool())?;
-                Some(format!("{}:{}", port, if ok { "ok" } else { "fail" }))
-            })
-            .collect();
-        port_statuses.join(";")
-    } else {
-        String::new()
-    };
-
-    // Extract disk info
-    let disk_count = health
-        .get("total_disks")
-        .and_then(|v| v.as_u64())
-        .map(|v| v.to_string())
-        .unwrap_or_default();
-
-    let disk_alerts_count = health
-        .get("disk_alerts")
-        .and_then(|v| v.as_array())
-        .map(|v| v.len().to_string())
-        .unwrap_or_default();
-
-    // Extract service alerts
-    let service_alerts_count = health
-        .get("service_alerts")
-        .and_then(|v| v.as_u64())
-        .map(|v| v.to_string())
-        .unwrap_or_default();
-
-    // Extract process count
-    let process_count = health
-        .get("process_count")
-        .and_then(|v| v.as_u64())
-        .map(|v| v.to_string())
-        .unwrap_or_default();
-
-    (
-        timestamp.to_string(),
-        ipv4_addresses.join(", "),
-        ipv6_addresses.join(", "),
-        os_version,
-        build_number,
-        total_memory_mb,
-        used_memory_mb,
-        memory_used_percent,
-        uptime_hours,
-        ping_ok,
-        tcp_ports_status,
-        disk_count,
-        disk_alerts_count,
-        service_alerts_count,
-        process_count,
-    )
-}
-
-/// Extract comprehensive health data for CSV export - all fields shown on host cards
+/// Deserializes the stored JSON into `SystemHealthSummary` (the same struct
+/// produced by the health probe) so that field renames or type changes produce
+/// compile errors instead of silent data loss.
 pub(crate) fn extract_health_fields_comprehensive(
     health_json: &str,
     timestamp: &str,
 ) -> CsvHealthFields {
-    let health: serde_json::Value = match serde_json::from_str(health_json) {
+    let health: SystemHealthSummary = match serde_json::from_str(health_json) {
         Ok(v) => v,
         Err(_) => return CsvHealthFields::default(),
     };
@@ -319,42 +135,23 @@ pub(crate) fn extract_health_fields_comprehensive(
     };
 
     // OS Info
-    if let Some(os_info) = health.get("os_info") {
-        fields.hostname = os_info
-            .get("hostname")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        fields.os_version = os_info
-            .get("os_version")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        fields.build_number = os_info
-            .get("build_number")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        fields.product_type = os_info
-            .get("product_type")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        fields.install_date = os_info
-            .get("install_date")
+    fields.hostname = health.os_info.hostname.clone();
+    fields.os_version = health.os_info.os_version.clone();
+    fields.build_number = health.os_info.build_number.clone();
+    fields.product_type = health.os_info.product_type.clone();
+    fields.install_date = health.os_info.install_date.clone();
+
+    // Location — injected by the frontend JS, not part of SystemHealthSummary.
+    // Extract from raw JSON as a best-effort field.
+    if let Ok(raw) = serde_json::from_str::<serde_json::Value>(health_json) {
+        fields.location = raw
+            .get("_location")
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
     }
 
-    // Location (stored in _location field)
-    fields.location = health
-        .get("_location")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
-
-    // Network adapters - extract all network info
+    // Network adapters
     let mut ipv4_list = Vec::new();
     let mut ipv6_list = Vec::new();
     let mut subnet_list = Vec::new();
@@ -362,83 +159,52 @@ pub(crate) fn extract_health_fields_comprehensive(
     let mut dns_list = Vec::new();
     let mut adapter_names = Vec::new();
 
-    if let Some(adapters) = health.get("net_adapters").and_then(|a| a.as_array()) {
+    if let Some(adapters) = &health.net_adapters {
         for adapter in adapters {
-            // Adapter name/alias
-            if let Some(alias) = adapter.get("alias").and_then(|v| v.as_str()) {
-                if !alias.is_empty() {
-                    adapter_names.push(alias.to_string());
-                }
-            } else if let Some(desc) = adapter.get("description").and_then(|v| v.as_str()) {
-                if !desc.is_empty() {
-                    adapter_names.push(desc.to_string());
+            if !adapter.alias.is_empty() {
+                adapter_names.push(adapter.alias.clone());
+            } else if !adapter.description.is_empty() {
+                adapter_names.push(adapter.description.clone());
+            }
+
+            for ip in &adapter.ipv4 {
+                if !ip.is_empty() {
+                    ipv4_list.push(ip.clone());
                 }
             }
 
-            // IPv4 addresses
-            if let Some(ipv4_arr) = adapter.get("ipv4").and_then(|a| a.as_array()) {
-                for ip in ipv4_arr {
-                    if let Some(ip_str) = ip.as_str() {
-                        if !ip_str.is_empty() {
-                            ipv4_list.push(ip_str.to_string());
-                        }
-                    }
+            for prefix in &adapter.ipv4_prefix {
+                if *prefix <= 32 {
+                    let mask = if *prefix == 0 {
+                        0u32
+                    } else {
+                        !0u32 << (32 - prefix)
+                    };
+                    subnet_list.push(format!(
+                        "{}.{}.{}.{}",
+                        (mask >> 24) & 255,
+                        (mask >> 16) & 255,
+                        (mask >> 8) & 255,
+                        mask & 255
+                    ));
                 }
             }
 
-            // IPv4 prefix/subnet masks
-            if let Some(prefix_arr) = adapter.get("ipv4_prefix").and_then(|a| a.as_array()) {
-                for prefix in prefix_arr {
-                    let prefix_val = prefix
-                        .as_u64()
-                        .or_else(|| prefix.as_str().and_then(|s| s.parse().ok()));
-                    if let Some(p) = prefix_val {
-                        // Convert CIDR prefix to subnet mask
-                        if p <= 32 {
-                            let mask = if p == 0 { 0u32 } else { !0u32 << (32 - p) };
-                            let subnet = format!(
-                                "{}.{}.{}.{}",
-                                (mask >> 24) & 255,
-                                (mask >> 16) & 255,
-                                (mask >> 8) & 255,
-                                mask & 255
-                            );
-                            subnet_list.push(subnet);
-                        }
-                    }
+            for ip in &adapter.ipv6 {
+                if !ip.is_empty() {
+                    ipv6_list.push(ip.clone());
                 }
             }
 
-            // IPv6 addresses
-            if let Some(ipv6_arr) = adapter.get("ipv6").and_then(|a| a.as_array()) {
-                for ip in ipv6_arr {
-                    if let Some(ip_str) = ip.as_str() {
-                        if !ip_str.is_empty() {
-                            ipv6_list.push(ip_str.to_string());
-                        }
-                    }
+            for gw in &adapter.gateway {
+                if !gw.is_empty() && !gateway_list.contains(gw) {
+                    gateway_list.push(gw.clone());
                 }
             }
 
-            // Gateways
-            if let Some(gw_arr) = adapter.get("gateway").and_then(|a| a.as_array()) {
-                for gw in gw_arr {
-                    if let Some(gw_str) = gw.as_str() {
-                        if !gw_str.is_empty() && !gateway_list.contains(&gw_str.to_string()) {
-                            gateway_list.push(gw_str.to_string());
-                        }
-                    }
-                }
-            }
-
-            // DNS servers
-            if let Some(dns_arr) = adapter.get("dns").and_then(|a| a.as_array()) {
-                for dns in dns_arr {
-                    if let Some(dns_str) = dns.as_str() {
-                        if !dns_str.is_empty() && !dns_list.contains(&dns_str.to_string()) {
-                            dns_list.push(dns_str.to_string());
-                        }
-                    }
+            for dns in &adapter.dns {
+                if !dns.is_empty() && !dns_list.contains(dns) {
+                    dns_list.push(dns.clone());
                 }
             }
         }
@@ -452,219 +218,130 @@ pub(crate) fn extract_health_fields_comprehensive(
     fields.network_adapters = adapter_names.join("; ");
 
     // Memory (convert MB to GB for readability)
-    let total_mb = health
-        .get("total_memory_mb")
-        .and_then(|v| v.as_f64())
-        .unwrap_or(0.0);
-    let used_mb = health
-        .get("used_memory_mb")
-        .and_then(|v| v.as_f64())
-        .unwrap_or(0.0);
-    let mem_percent = health
-        .get("memory_used_percent")
-        .and_then(|v| v.as_f64())
-        .unwrap_or(0.0);
-
-    if total_mb > 0.0 {
-        fields.total_memory_gb = format!("{:.1}", total_mb / 1024.0);
+    if health.total_memory_mb > 0.0 {
+        fields.total_memory_gb = format!("{:.1}", health.total_memory_mb / 1024.0);
     }
-    if used_mb > 0.0 {
-        fields.used_memory_gb = format!("{:.1}", used_mb / 1024.0);
+    if health.used_memory_mb > 0.0 {
+        fields.used_memory_gb = format!("{:.1}", health.used_memory_mb / 1024.0);
     }
-    if mem_percent > 0.0 {
-        fields.memory_used_percent = format!("{:.1}%", mem_percent);
+    if health.memory_used_percent > 0.0 {
+        fields.memory_used_percent = format!("{:.1}%", health.memory_used_percent);
     }
 
     // Uptime and CPU
-    if let Some(uptime) = health.get("uptime") {
-        let uptime_hours = uptime
-            .get("uptime_hours")
-            .and_then(|v| v.as_f64())
-            .unwrap_or(0.0);
-        if uptime_hours > 0.0 {
-            fields.uptime_hours = format!("{:.1}", uptime_hours);
-            // Human-readable uptime
-            let days = (uptime_hours / 24.0).floor() as u64;
-            let hours = (uptime_hours % 24.0).floor() as u64;
-            if days > 0 {
-                fields.uptime_display = format!("{}d {}h", days, hours);
+    if let Some(uptime) = &health.uptime {
+        if uptime.uptime_hours > 0.0 {
+            fields.uptime_hours = format!("{:.1}", uptime.uptime_hours);
+            let days = (uptime.uptime_hours / 24.0).floor() as u64;
+            let hours = (uptime.uptime_hours % 24.0).floor() as u64;
+            fields.uptime_display = if days > 0 {
+                format!("{}d {}h", days, hours)
             } else {
-                fields.uptime_display = format!("{}h", hours);
+                format!("{}h", hours)
+            };
+        }
+
+        if let Some(cpu) = uptime.cpu_load_pct {
+            if cpu > 0.0 {
+                fields.cpu_load_percent = format!("{:.0}%", cpu);
             }
         }
 
-        let cpu = uptime
-            .get("cpu_load_pct")
-            .and_then(|v| v.as_f64())
-            .unwrap_or(0.0);
-        if cpu > 0.0 {
-            fields.cpu_load_percent = format!("{:.0}%", cpu);
-        }
-
-        fields.last_boot_time = uptime
-            .get("last_boot")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
+        fields.last_boot_time = uptime.last_boot.clone();
     }
 
     // Process count
-    if let Some(pc) = health.get("process_count").and_then(|v| v.as_u64()) {
-        fields.process_count = pc.to_string();
+    if health.process_count > 0 {
+        fields.process_count = health.process_count.to_string();
     }
 
     // Reachability
-    if let Some(reach) = health.get("reachability") {
-        fields.ping_ok = reach
-            .get("ping_ok")
-            .and_then(|v| v.as_bool())
-            .map(|v| if v { "Yes" } else { "No" })
-            .unwrap_or("")
-            .to_string();
+    if let Some(reach) = &health.reachability {
+        fields.ping_ok = if reach.ping_ok { "Yes" } else { "No" }.to_string();
 
-        if let Some(ports) = reach.get("tcp_ports").and_then(|p| p.as_array()) {
-            let port_statuses: Vec<String> = ports
-                .iter()
-                .filter_map(|p| {
-                    let port = p.get("port").and_then(|v| v.as_u64())?;
-                    let ok = p.get("ok").and_then(|v| v.as_bool())?;
-                    Some(format!("{}: {}", port, if ok { "OK" } else { "FAIL" }))
-                })
-                .collect();
-            fields.tcp_ports_status = port_statuses.join("; ");
-        }
+        let port_statuses: Vec<String> = reach
+            .tcp_ports
+            .iter()
+            .map(|p| format!("{}: {}", p.port, if p.ok { "OK" } else { "FAIL" }))
+            .collect();
+        fields.tcp_ports_status = port_statuses.join("; ");
     }
 
     // Disks
-    if let Some(total) = health.get("total_disks").and_then(|v| v.as_u64()) {
-        fields.total_disks = total.to_string();
+    if health.total_disks > 0 {
+        fields.total_disks = health.total_disks.to_string();
     }
 
-    if let Some(disks) = health.get("disks").and_then(|d| d.as_array()) {
-        let disk_info: Vec<String> = disks
-            .iter()
-            .filter_map(|d| {
-                let drive = d.get("drive").and_then(|v| v.as_str()).unwrap_or("?");
-                let free_gb = d.get("free_gb").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                let total_gb = d.get("total_gb").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                let pct_free = d
-                    .get("percent_free")
-                    .and_then(|v| v.as_f64())
-                    .unwrap_or(0.0);
-                if total_gb > 0.0 {
-                    Some(format!(
-                        "{}: {:.0}GB free of {:.0}GB ({:.0}% free)",
-                        drive, free_gb, total_gb, pct_free
-                    ))
-                } else {
-                    None
-                }
-            })
-            .collect();
-        fields.disk_details = disk_info.join("; ");
-    }
+    let disk_info: Vec<String> = health
+        .disks
+        .iter()
+        .filter(|d| d.total_gb > 0.0)
+        .map(|d| {
+            format!(
+                "{}: {:.0}GB free of {:.0}GB ({:.0}% free)",
+                d.drive, d.free_gb, d.total_gb, d.percent_free
+            )
+        })
+        .collect();
+    fields.disk_details = disk_info.join("; ");
 
-    if let Some(alerts) = health.get("disk_alerts").and_then(|a| a.as_array()) {
-        let alert_info: Vec<String> = alerts
-            .iter()
-            .map(|a| {
-                let drive = a.get("drive").and_then(|v| v.as_str()).unwrap_or("?");
-                let pct_free = a
-                    .get("percent_free")
-                    .and_then(|v| v.as_f64())
-                    .unwrap_or(0.0);
-                format!("{}: {:.0}% free (LOW)", drive, pct_free)
-            })
-            .collect();
-        fields.disk_alerts = alert_info.join("; ");
-    }
+    let alert_info: Vec<String> = health
+        .disk_alerts
+        .iter()
+        .map(|a| format!("{}: {:.0}% free (LOW)", a.drive, a.percent_free))
+        .collect();
+    fields.disk_alerts = alert_info.join("; ");
 
     // Services
-    if let Some(services) = health.get("service_status").and_then(|s| s.as_array()) {
-        let svc_info: Vec<String> = services
-            .iter()
-            .filter_map(|s| {
-                let name = s.get("name").and_then(|v| v.as_str()).unwrap_or("?");
-                let status = s.get("status").and_then(|v| v.as_str()).unwrap_or("?");
-                // Skip NotFound services
-                if status.to_lowercase() == "notfound" {
-                    return None;
-                }
-                Some(format!("{}: {}", name, status))
-            })
-            .collect();
-        fields.service_status = svc_info.join("; ");
+    let svc_info: Vec<String> = health
+        .service_status
+        .iter()
+        .filter(|s| s.status.to_lowercase() != "notfound")
+        .map(|s| format!("{}: {}", s.name, s.status))
+        .collect();
+    fields.service_status = svc_info.join("; ");
 
-        let stopped: Vec<String> = services
-            .iter()
-            .filter_map(|s| {
-                let name = s.get("name").and_then(|v| v.as_str()).unwrap_or("?");
-                let status = s
-                    .get("status")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("?")
-                    .to_lowercase();
-                if status != "running" && status != "notfound" {
-                    Some(name.to_string())
-                } else {
-                    None
-                }
-            })
-            .collect();
-        fields.stopped_services = stopped.join("; ");
-    }
+    let stopped: Vec<String> = health
+        .service_status
+        .iter()
+        .filter(|s| {
+            let status = s.status.to_lowercase();
+            status != "running" && status != "notfound"
+        })
+        .map(|s| s.name.clone())
+        .collect();
+    fields.stopped_services = stopped.join("; ");
 
-    if let Some(alerts) = health.get("service_alerts").and_then(|v| v.as_u64()) {
-        fields.service_alerts_count = alerts.to_string();
+    if health.service_alerts > 0 {
+        fields.service_alerts_count = health.service_alerts.to_string();
     }
 
     // High CPU processes
-    if let Some(procs) = health.get("high_cpu_processes").and_then(|p| p.as_array()) {
-        let threshold = health
-            .get("high_cpu_threshold")
-            .and_then(|v| v.as_f64())
-            .unwrap_or(50.0);
-        let proc_info: Vec<String> = procs
-            .iter()
-            .filter_map(|p| {
-                let name = p.get("name").and_then(|v| v.as_str()).unwrap_or("?");
-                let cpu = p.get("cpu_percent").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                if cpu > threshold {
-                    Some(format!("{} ({:.0}%)", name, cpu))
-                } else {
-                    None
-                }
-            })
-            .take(5)
-            .collect();
-        fields.high_cpu_processes = proc_info.join("; ");
-    }
+    let proc_info: Vec<String> = health
+        .high_cpu_processes
+        .iter()
+        .filter(|p| p.cpu_percent > health.high_cpu_threshold)
+        .take(5)
+        .map(|p| format!("{} ({:.0}%)", p.name, p.cpu_percent))
+        .collect();
+    fields.high_cpu_processes = proc_info.join("; ");
 
     // Pending reboot
-    if let Some(reboot) = health.get("pending_reboot") {
-        let pending = reboot
-            .get("pending")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-        fields.reboot_pending = if pending { "Yes" } else { "No" }.to_string();
-
-        if let Some(signals) = reboot.get("signals").and_then(|s| s.as_array()) {
-            let signal_names: Vec<String> = signals
-                .iter()
-                .filter_map(|s| s.as_str().map(String::from))
-                .collect();
-            fields.reboot_signals = signal_names.join("; ");
-        }
+    if let Some(reboot) = &health.pending_reboot {
+        fields.reboot_pending = if reboot.pending { "Yes" } else { "No" }.to_string();
+        fields.reboot_signals = reboot.signals.join("; ");
     }
 
     // Recent errors count
-    if let Some(errors) = health.get("recent_errors").and_then(|e| e.as_array()) {
+    if let Some(errors) = &health.recent_errors {
         fields.recent_errors_count = errors.len().to_string();
     }
 
-    // WinRM issue (degraded probe indicator — bool in SystemHealthSummary)
-    if let Some(issue) = health.get("winrm_issue").and_then(|v| v.as_bool()) {
-        fields.winrm_issue = if issue { "Yes" } else { "No" }.to_string();
+    // WinRM issue
+    if health.winrm_issue {
+        fields.winrm_issue = "Yes".to_string();
+    } else {
+        fields.winrm_issue = "No".to_string();
     }
 
     fields
