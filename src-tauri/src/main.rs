@@ -2135,10 +2135,7 @@ fn extract_health_fields_comprehensive(health_json: &str, timestamp: &str) -> Cs
         let disk_info: Vec<String> = disks
             .iter()
             .filter_map(|d| {
-                let drive = d
-                    .get("drive_letter")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("?");
+                let drive = d.get("drive").and_then(|v| v.as_str()).unwrap_or("?");
                 let free_gb = d.get("free_gb").and_then(|v| v.as_f64()).unwrap_or(0.0);
                 let total_gb = d.get("total_gb").and_then(|v| v.as_f64()).unwrap_or(0.0);
                 let pct_free = d
@@ -2162,10 +2159,7 @@ fn extract_health_fields_comprehensive(health_json: &str, timestamp: &str) -> Cs
         let alert_info: Vec<String> = alerts
             .iter()
             .map(|a| {
-                let drive = a
-                    .get("drive_letter")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("?");
+                let drive = a.get("drive").and_then(|v| v.as_str()).unwrap_or("?");
                 let pct_free = a
                     .get("percent_free")
                     .and_then(|v| v.as_f64())
@@ -2259,9 +2253,9 @@ fn extract_health_fields_comprehensive(health_json: &str, timestamp: &str) -> Cs
         fields.recent_errors_count = errors.len().to_string();
     }
 
-    // WinRM issue (degraded probe indicator)
-    if let Some(issue) = health.get("winrm_issue").and_then(|v| v.as_str()) {
-        fields.winrm_issue = issue.to_string();
+    // WinRM issue (degraded probe indicator — bool in SystemHealthSummary)
+    if let Some(issue) = health.get("winrm_issue").and_then(|v| v.as_bool()) {
+        fields.winrm_issue = if issue { "Yes" } else { "No" }.to_string();
     }
 
     fields
@@ -3404,7 +3398,7 @@ async fn remote_restart(server_name: String) -> Result<(), String> {
             .await
             .map_err(|e| format!("Failed to connect to {}: {}", server_name, e))?;
 
-        let restart_script = format!("Restart-Computer -ComputerName {} -Force", server_name);
+        let restart_script = "Restart-Computer -Force".to_string();
 
         let result = session.execute_powershell(&restart_script).await;
 
@@ -3476,7 +3470,7 @@ async fn remote_shutdown(server_name: String) -> Result<(), String> {
             .await
             .map_err(|e| format!("Failed to connect to {}: {}", server_name, e))?;
 
-        let shutdown_script = format!("Stop-Computer -ComputerName {} -Force", server_name);
+        let shutdown_script = "Stop-Computer -Force".to_string();
 
         let result = session.execute_powershell(&shutdown_script).await;
 
@@ -3497,9 +3491,9 @@ async fn remote_shutdown(server_name: String) -> Result<(), String> {
     }
 }
 
-/// Save notes for a server in hosts.csv
+/// Save notes for a server in the hosts database.
 ///
-/// Updates or creates the notes field for a specific server.
+/// Updates the notes field for a specific server.
 #[allow(dead_code)] // Called from JavaScript via Tauri IPC
 #[tauri::command]
 async fn save_server_notes(server_name: String, notes: String) -> Result<(), String> {
@@ -3541,7 +3535,7 @@ async fn save_server_notes(server_name: String, notes: String) -> Result<(), Str
             normalized_name
         ));
         return Err(format!(
-            "Server '{}' not found in hosts.csv",
+            "Server '{}' not found in hosts database",
             normalized_name
         ));
     }
@@ -3645,7 +3639,7 @@ async fn update_host(
     Ok(())
 }
 
-/// Replace hosts.csv with provided host entries
+/// Replace all hosts in the database with provided host entries
 #[tauri::command]
 async fn set_hosts(hosts: Vec<HostUpdate>) -> Result<(), String> {
     let start = SystemTime::now();
@@ -3690,7 +3684,7 @@ async fn set_hosts(hosts: Vec<HostUpdate>) -> Result<(), String> {
     result
 }
 
-/// Rename a group label across all hosts in hosts.csv
+/// Rename a group label across all hosts in the database
 #[tauri::command]
 async fn rename_group(old_group: String, new_group: String) -> Result<usize, String> {
     logger::log_info(&format!("rename_group: '{}' -> '{}'", old_group, new_group));
@@ -5828,7 +5822,10 @@ mod tests {
             ))?;
 
             let hosts = rt.block_on(get_hosts())?;
-            let app1 = hosts.iter().find(|h| h.name == "APP1").expect("app1 exists");
+            let app1 = hosts
+                .iter()
+                .find(|h| h.name == "APP1")
+                .expect("app1 exists");
             assert_eq!(app1.notes.as_deref(), Some("new note"));
             assert_eq!(app1.group.as_deref(), Some("ops"));
             assert_eq!(app1.os_type.as_deref(), Some("Linux"));
@@ -5870,7 +5867,10 @@ mod tests {
 
             // Host row should remain unchanged after failed update.
             let hosts = rt.block_on(get_hosts())?;
-            let app1 = hosts.iter().find(|h| h.name == "APP1").expect("app1 exists");
+            let app1 = hosts
+                .iter()
+                .find(|h| h.name == "APP1")
+                .expect("app1 exists");
             assert_eq!(app1.services.as_ref().unwrap(), &vec!["WINRM".to_string()]);
             assert_eq!(app1.os_type.as_deref(), Some("Windows"));
             Ok(())
@@ -6550,7 +6550,13 @@ async fn ldap_search_windows_servers(
         .map_err(|e| format!("LDAP bind rejected: {}", e))?;
 
     let filter = ldap_windows_filter(include_windows_clients);
-    let attrs = vec!["dNSHostName", "name", "cn", "description", "operatingSystem"];
+    let attrs = vec![
+        "dNSHostName",
+        "name",
+        "cn",
+        "description",
+        "operatingSystem",
+    ];
     let (entries, _res) = ldap
         .search(&base_dn, Scope::Subtree, filter, attrs)
         .await
@@ -6732,7 +6738,7 @@ fn merge_hosts(
     Ok(merged)
 }
 
-/// Scan Active Directory for Windows hosts and merge into hosts.csv using LDAP (no PowerShell)
+/// Scan Active Directory for Windows hosts and merge into the hosts database using LDAP (no PowerShell)
 #[tauri::command]
 async fn scan_domain(
     domain: Option<String>,
