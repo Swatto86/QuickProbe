@@ -33,7 +33,10 @@ one-click RDP, service/process management, and encrypted backup/restore — all 
 │  Communicates with backend via Tauri IPC commands         │
 ├──────────────────────────────────────────────────────────┤
 │  Tauri Shell (src-tauri/src/main.rs)                     │
-│  57 IPC command handlers, session pool, backup/restore   │
+│  Tauri setup, tray, window lifecycle, generate_handler!  │
+├──────────────────────────────────────────────────────────┤
+│  Commands (src-tauri/src/commands/)                      │
+│  57 IPC command handlers, organised by domain            │
 ├──────────────────────────────────────────────────────────┤
 │  Core Logic (src-tauri/src/core/)  — platform-agnostic   │
 │  session.rs trait, probes.rs, credential.rs, validation  │
@@ -84,8 +87,24 @@ QuickProbe/
 │   ├── tauri.conf.json           # App windows, bundle, CSP, updater
 │   ├── capabilities/default.json # Tauri v2 permissions
 │   └── src/
-│       ├── main.rs               # Tauri entry + 55 IPC command handlers
+│       ├── main.rs               # Tauri entry, tray, window lifecycle, tests
 │       ├── lib.rs                # Public crate root — re-exports
+│       ├── commands/             # IPC command handlers (extracted from main.rs)
+│       │   ├── mod.rs            # Module root + pub(crate) re-exports
+│       │   ├── types.rs          # Shared request/response types
+│       │   ├── helpers.rs        # KV store, app settings, normalisation
+│       │   ├── state.rs          # Session pool, credential resolution
+│       │   ├── auth.rs           # Login, logout, credential checking
+│       │   ├── hosts.rs          # Host CRUD + SQLite persistence
+│       │   ├── health.rs         # System health probes, quick status
+│       │   ├── launcher.rs       # RDP, SSH, Explorer, Registry launchers
+│       │   ├── remote.rs         # Remote restart/shutdown, PS/SSH execution
+│       │   ├── services.rs       # Service & process management
+│       │   ├── backup.rs         # Encrypted backup/restore
+│       │   ├── export.rs         # CSV export
+│       │   ├── ldap.rs           # Active Directory scanning
+│       │   ├── settings_cmds.rs  # Settings, autostart, dashboard cache
+│       │   └── system.rs         # App info, logging relay, auto-update
 │       ├── core/                 # Platform-agnostic business logic
 │       │   ├── mod.rs
 │       │   ├── session.rs        # RemoteSession trait + types
@@ -139,7 +158,8 @@ QuickProbe/
 ### Rust crate (`quickprobe`)
 
 - **`lib.rs`** — public crate root; re-exports `core::*`, `models::*`, `utils::*`.
-- **`main.rs`** — Tauri binary crate; registers 57 `#[tauri::command]` IPC handlers.
+- **`main.rs`** — Tauri binary crate; setup, tray, window lifecycle, `generate_handler![]`.
+- **`commands/`** — 57 `#[tauri::command]` IPC handlers organised by domain.
 
 ### Key Tauri IPC Commands (frontend → backend)
 

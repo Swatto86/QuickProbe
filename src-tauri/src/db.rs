@@ -53,7 +53,7 @@ use std::time::Duration;
 
 const APP_NAME: &str = "QuickProbe";
 const DB_FILE_NAME: &str = "quickprobe.db";
-const SCHEMA_VERSION: &str = "3";
+const SCHEMA_VERSION: u32 = 3;
 
 #[derive(Debug, thiserror::Error)]
 pub enum QpError {
@@ -139,16 +139,19 @@ pub fn init_schema(conn: &Connection) -> Result<(), QpError> {
     )?;
 
     // Check current version for migrations
-    let current_version: String = conn
+    let current_version: u32 = conn
         .query_row(
             "SELECT value FROM meta WHERE key = 'schema_version'",
             [],
-            |row| row.get(0),
+            |row| {
+                let s: String = row.get(0)?;
+                Ok(s.parse::<u32>().unwrap_or(0))
+            },
         )
-        .unwrap_or_else(|_| "0".to_string());
+        .unwrap_or(0);
 
     // Apply migrations
-    if current_version.as_str() < "2" {
+    if current_version < 2 {
         conn.execute(
             "CREATE TABLE IF NOT EXISTS host_health (
                 server_name TEXT PRIMARY KEY,
@@ -160,7 +163,7 @@ pub fn init_schema(conn: &Connection) -> Result<(), QpError> {
     }
 
     // Migration v3: Remove CASCADE constraint from host_health to preserve snapshots when hosts are updated
-    if current_version.as_str() < "3" {
+    if current_version < 3 {
         // SQLite doesn't support ALTER TABLE to drop foreign key, so we need to recreate the table
         conn.execute(
             "CREATE TABLE IF NOT EXISTS host_health_new (
@@ -186,7 +189,7 @@ pub fn init_schema(conn: &Connection) -> Result<(), QpError> {
     conn.execute(
         "INSERT INTO meta(key, value) VALUES('schema_version', ?1)
          ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-        [SCHEMA_VERSION],
+        [SCHEMA_VERSION.to_string()],
     )?;
 
     Ok(())
@@ -339,7 +342,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(schema_version, SCHEMA_VERSION);
+        assert_eq!(schema_version, SCHEMA_VERSION.to_string());
     }
 
     #[test]
