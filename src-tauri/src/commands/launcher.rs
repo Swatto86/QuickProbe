@@ -105,7 +105,11 @@ pub(crate) fn build_rdp_content(host: &str, username: &str, domain: &str) -> Str
             "redirectprinters:i:0\r\n",
             "redirectcomports:i:0\r\n",
             "redirectsmartcards:i:0\r\n",
-            "redirectclipboard:i:0\r\n",
+            // Clipboard is left ON — copy/paste between host and session is
+            // a routine admin workflow. It does still cause Windows 11 to
+            // show the resource-access consent dialog on first connect, but
+            // only for the clipboard item.
+            "redirectclipboard:i:1\r\n",
             "redirectposdevices:i:0\r\n",
             "redirectwebauthn:i:0\r\n",
             "devicestoredirect:s:\r\n",
