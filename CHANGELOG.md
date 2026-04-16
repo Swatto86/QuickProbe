@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.1] - 2026-04-16
+
+### Fixed
+- **Table view sticky header was transparent** — DaisyUI v4 stores theme tokens (`--b1`, `--b2`, `--p`, …) as `oklch` components, not `hsl`. Every `hsl(var(--…))` in `dashboard-minimal.css` therefore resolved to an invalid color and rendered transparent, which let scrolled rows bleed over the pinned header. Switched all 34 occurrences to `oklch(var(--…))`; this also repairs a number of subtler color mismatches on hover/selected states elsewhere on the dashboard.
+- **Floating actions menu left behind on view switch / re-render** — the body-attached `#qp-floating-actions-menu` is now explicitly closed on view switch and at the start of every `displayAllServers()`, so its document-level listeners don't leak against a detached DOM.
+- **RDP launch showed "Allow access to resources" consent dialog on Windows 11** — all non-essential device redirections (printers, smart cards, WebAuthn, audio capture, drives, USB, COM/POS) are now disabled by default in the generated `.rdp`. Authentication level raised from 0 to 2 to stop the "Unknown publisher" banner for properly-configured servers.
+- **Clipboard redirection kept enabled** — copy/paste between host and RDP session is a routine admin workflow and remains on by default.
+
 ### Added
 - Table view: **drag-to-reorder columns** (drop indicators highlight the target position; order persisted to `qp_table_col_order`)
 - Table view: **Actions column moved to position 0** by default
