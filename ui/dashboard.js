@@ -5906,12 +5906,17 @@
                 if (col.align === 'right') th.style.textAlign = 'right';
                 if (col.align === 'center') th.style.textAlign = 'center';
 
-                const labelBtn = document.createElement('button');
-                labelBtn.type = 'button';
+                const labelBtn = document.createElement('span');
                 labelBtn.className = 'qp-th-label';
                 labelBtn.textContent = col.label;
+                labelBtn.setAttribute('role', 'button');
+                labelBtn.setAttribute('tabindex', '0');
+                // `draggable="false"` on the child lets the dragstart event
+                // bubble up to the parent <th draggable="true"> so reordering
+                // works when the user grabs the label itself.
+                labelBtn.draggable = false;
                 if (col.nosort) {
-                    labelBtn.disabled = true;
+                    labelBtn.setAttribute('aria-disabled', 'true');
                     labelBtn.classList.add('nosort');
                 } else if (tableSortState.key === col.key) {
                     labelBtn.classList.add('sorted');
@@ -5926,6 +5931,12 @@
                         }
                         saveTableSort();
                         displayAllServers();
+                    });
+                    labelBtn.addEventListener('keydown', (ev) => {
+                        if (ev.key === 'Enter' || ev.key === ' ') {
+                            ev.preventDefault();
+                            labelBtn.click();
+                        }
                     });
                 }
                 th.appendChild(labelBtn);

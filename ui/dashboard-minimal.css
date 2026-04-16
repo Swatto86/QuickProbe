@@ -517,11 +517,12 @@
 
 .qp-table-wrapper {
     width: 100%;
-    /* Wrapper is the scroll container for both axes so the sticky thead
-       sticks to the top of the wrapper (within the viewport) instead of
-       scrolling off with the page. */
+    /* Wrapper is the scroll container for both axes. Sticky thead pins to
+       the top of the wrapper (which stays within the viewport because of
+       the bounded height below), and sticky-left first column pins to the
+       left edge while scrolling horizontally. */
     overflow: auto;
-    max-height: calc(100vh - 260px);
+    max-height: calc(100vh - 300px);
     border: 1px solid hsl(var(--b3));
     border-radius: var(--rounded-box, 0.5rem);
     background: hsl(var(--b1));
@@ -531,7 +532,11 @@
     width: 100%;
     min-width: 1400px;
     table-layout: fixed;
-    border-collapse: collapse;
+    /* `separate` is required for sticky <thead> + sticky-left cells to paint
+       correctly in Chromium. With `collapse`, borders bleed between cells
+       and the sticky thead renders behind scrolling rows. */
+    border-collapse: separate;
+    border-spacing: 0;
 }
 
 .qp-server-table thead {
@@ -567,6 +572,10 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     vertical-align: middle;
+    /* The span sits inside a draggable <th>; we still want the user to be
+       able to grab it to reorder the column. */
+    -webkit-user-drag: element;
+    user-select: none;
 }
 
 .qp-server-table thead th .qp-th-label.nosort {
