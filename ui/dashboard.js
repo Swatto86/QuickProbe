@@ -5463,7 +5463,10 @@
 
         // Column definitions for the table view. `key` is used as dataset attributes
         // and for sort/resize state. `width` is the initial column width in pixels.
+        // Actions is intentionally first so it stays visible (the first column is
+        // sticky-left inside the horizontally-scrollable wrapper).
         const TABLE_COLUMNS = [
+            { key: 'actions',  label: 'Actions',   width: 170, align: 'left', nosort: true },
             { key: 'status',   label: 'Status',    width: 80,  align: 'center' },
             { key: 'name',     label: 'Host',      width: 200, align: 'left' },
             { key: 'os',       label: 'OS',        width: 90,  align: 'left' },
@@ -5475,12 +5478,37 @@
             { key: 'ram',      label: 'RAM %',     width: 110, align: 'right' },
             { key: 'disk',     label: 'Disk Free', width: 110, align: 'right' },
             { key: 'services', label: 'Services',  width: 140, align: 'left' },
-            { key: 'notes',    label: 'Notes',     width: 220, align: 'left' },
-            { key: 'actions',  label: 'Actions',   width: 240, align: 'left', nosort: true }
+            { key: 'notes',    label: 'Notes',     width: 220, align: 'left' }
         ];
         const TABLE_COL_WIDTHS_KEY = 'qp_table_col_widths';
         const TABLE_SORT_KEY = 'qp_table_sort';
+        const TABLE_COL_ORDER_KEY = 'qp_table_col_order';
         let tableSortState = loadTableSort();
+
+        // Returns column order (array of keys) honouring any user reordering.
+        // Unknown saved keys are dropped; any newly-added columns are appended.
+        function loadTableColOrder() {
+            const defaultOrder = TABLE_COLUMNS.map(c => c.key);
+            try {
+                const raw = localStorage.getItem(TABLE_COL_ORDER_KEY);
+                if (!raw) return defaultOrder;
+                const parsed = JSON.parse(raw);
+                if (!Array.isArray(parsed)) return defaultOrder;
+                const valid = parsed.filter(k => defaultOrder.includes(k));
+                const missing = defaultOrder.filter(k => !valid.includes(k));
+                return [...valid, ...missing];
+            } catch (e) {
+                return defaultOrder;
+            }
+        }
+
+        function saveTableColOrder(order) {
+            try {
+                localStorage.setItem(TABLE_COL_ORDER_KEY, JSON.stringify(order));
+            } catch (e) {
+                console.warn('Failed to save table column order', e);
+            }
+        }
 
         function loadTableColWidths() {
             try {
@@ -5827,10 +5855,15 @@
 
         function renderTableView(servers, container) {
             const savedWidths = loadTableColWidths();
-            const columns = TABLE_COLUMNS.map(c => ({
-                ...c,
-                width: Number(savedWidths[c.key]) > 20 ? Number(savedWidths[c.key]) : c.width
-            }));
+            const savedOrder = loadTableColOrder();
+            const byKey = new Map(TABLE_COLUMNS.map(c => [c.key, c]));
+            const columns = savedOrder.map(key => {
+                const base = byKey.get(key);
+                return {
+                    ...base,
+                    width: Number(savedWidths[key]) > 20 ? Number(savedWidths[key]) : base.width
+                };
+            });
 
             // Sort servers according to current sort state.
             let rows = servers.slice();
@@ -5861,13 +5894,15 @@
             });
             table.appendChild(colgroup);
 
-            // Header with sort + resize handles.
+            // Header with sort + resize handles + drag-to-reorder.
             const thead = document.createElement('thead');
             const headerRow = document.createElement('tr');
             columns.forEach(col => {
                 const th = document.createElement('th');
                 th.dataset.key = col.key;
                 th.className = `qp-th-${col.key}`;
+                th.draggable = true;
+                th.title = 'Drag to reorder column';
                 if (col.align === 'right') th.style.textAlign = 'right';
                 if (col.align === 'center') th.style.textAlign = 'center';
 
@@ -5895,11 +5930,59 @@
                 }
                 th.appendChild(labelBtn);
 
-                // Resize handle (not on the last column)
+                // Resize handle (don't start a reorder drag from the handle)
                 const handle = document.createElement('span');
                 handle.className = 'qp-col-resize';
+                handle.draggable = false;
                 handle.addEventListener('mousedown', (e) => startColResize(e, col.key, colgroup));
+                handle.addEventListener('dragstart', (e) => { e.preventDefault(); e.stopPropagation(); });
                 th.appendChild(handle);
+
+                // --- Drag-and-drop column reordering ---
+                th.addEventListener('dragstart', (ev) => {
+                    // Suppress reorder drag while a resize is in progress or when
+                    // starting from the resize handle / sort button.
+                    if (document.body.classList.contains('qp-col-resizing')) { ev.preventDefault(); return; }
+                    if (ev.target && ev.target.closest && ev.target.closest('.qp-col-resize')) { ev.preventDefault(); return; }
+                    ev.dataTransfer.effectAllowed = 'move';
+                    try { ev.dataTransfer.setData('text/plain', col.key); } catch (e) { /* ignore */ }
+                    th.classList.add('qp-col-dragging');
+                });
+                th.addEventListener('dragend', () => {
+                    th.classList.remove('qp-col-dragging');
+                    headerRow.querySelectorAll('.qp-col-drop-before, .qp-col-drop-after')
+                        .forEach(el => el.classList.remove('qp-col-drop-before', 'qp-col-drop-after'));
+                });
+                th.addEventListener('dragover', (ev) => {
+                    ev.preventDefault();
+                    ev.dataTransfer.dropEffect = 'move';
+                    const rect = th.getBoundingClientRect();
+                    const before = (ev.clientX - rect.left) < (rect.width / 2);
+                    th.classList.toggle('qp-col-drop-before', before);
+                    th.classList.toggle('qp-col-drop-after', !before);
+                });
+                th.addEventListener('dragleave', () => {
+                    th.classList.remove('qp-col-drop-before', 'qp-col-drop-after');
+                });
+                th.addEventListener('drop', (ev) => {
+                    ev.preventDefault();
+                    let srcKey = '';
+                    try { srcKey = ev.dataTransfer.getData('text/plain') || ''; } catch (e) { /* ignore */ }
+                    th.classList.remove('qp-col-drop-before', 'qp-col-drop-after');
+                    if (!srcKey || srcKey === col.key) return;
+                    const rect = th.getBoundingClientRect();
+                    const insertBefore = (ev.clientX - rect.left) < (rect.width / 2);
+                    const currentOrder = loadTableColOrder();
+                    const from = currentOrder.indexOf(srcKey);
+                    if (from === -1) return;
+                    currentOrder.splice(from, 1);
+                    let to = currentOrder.indexOf(col.key);
+                    if (to === -1) return;
+                    if (!insertBefore) to += 1;
+                    currentOrder.splice(to, 0, srcKey);
+                    saveTableColOrder(currentOrder);
+                    displayAllServers();
+                });
 
                 headerRow.appendChild(th);
             });
@@ -5909,7 +5992,7 @@
             // Body
             const tbody = document.createElement('tbody');
             rows.forEach(server => {
-                tbody.appendChild(createServerRow(server));
+                tbody.appendChild(createServerRow(server, columns));
             });
             table.appendChild(tbody);
 
@@ -5924,7 +6007,7 @@
             }
         }
 
-        function createServerRow(server) {
+        function createServerRow(server, columns) {
             const m = computeTableRowMetrics(server);
             const tr = document.createElement('tr');
             tr.className = 'qp-server-row';
@@ -5979,27 +6062,25 @@
             const ipDisplay = m.primaryIp ? highlightMatch(m.primaryIp, searchTerm) : '<span class="text-base-content/40">—</span>';
             const uptimeDisplay = m.uptimeLabel ? escapeHtml(m.uptimeLabel) : '<span class="text-base-content/40">—</span>';
 
-            tr.innerHTML = `
-                <td class="qp-td-status" style="text-align:center" title="${m.online ? 'Online' : 'Offline'}">
-                    <span class="${statusTone} font-bold text-xs whitespace-nowrap">${statusLabel}</span>
-                </td>
-                <td class="qp-td-name" title="${escapeHtml(server.name)}">
-                    <span class="font-semibold">${highlightedName}</span>${pendingBadge}${winrmBadge}
-                </td>
-                <td class="qp-td-os">
-                    <span class="whitespace-nowrap">${osEmoji} ${escapeHtml(m.osType)}</span>
-                </td>
-                <td class="qp-td-group" title="${escapeHtml(m.group)}">${groupDisplay}</td>
-                <td class="qp-td-location" title="${escapeHtml(m.location || '')}">${locationDisplay}</td>
-                <td class="qp-td-ip">${ipDisplay}</td>
-                <td class="qp-td-uptime">${uptimeDisplay}</td>
-                <td class="qp-td-cpu" style="text-align:right"><span class="${cpuClass} font-semibold">${cpuLabel}</span></td>
-                <td class="qp-td-ram" style="text-align:right"><span class="${ramClass} font-semibold">${ramLabel}</span></td>
-                <td class="qp-td-disk" style="text-align:right"><span class="${diskClass} font-semibold">${diskLabel}</span></td>
-                <td class="qp-td-services">${servicesLabel}</td>
-                <td class="qp-td-notes" title="${escapeHtml(notesText)}"><span class="qp-notes-clip">${notesDisplay}</span></td>
-                <td class="qp-td-actions">${buildTableActionsMarkup(m.isLinux)}</td>
-            `;
+            // Per-column cell renderers. Must cover every key in TABLE_COLUMNS.
+            const cellHtml = {
+                status:   `<td class="qp-td-status" style="text-align:center" title="${m.online ? 'Online' : 'Offline'}"><span class="${statusTone} font-bold text-xs whitespace-nowrap">${statusLabel}</span></td>`,
+                name:     `<td class="qp-td-name" title="${escapeHtml(server.name)}"><span class="font-semibold">${highlightedName}</span>${pendingBadge}${winrmBadge}</td>`,
+                os:       `<td class="qp-td-os"><span class="whitespace-nowrap">${osEmoji} ${escapeHtml(m.osType)}</span></td>`,
+                group:    `<td class="qp-td-group" title="${escapeHtml(m.group)}">${groupDisplay}</td>`,
+                location: `<td class="qp-td-location" title="${escapeHtml(m.location || '')}">${locationDisplay}</td>`,
+                ip:       `<td class="qp-td-ip">${ipDisplay}</td>`,
+                uptime:   `<td class="qp-td-uptime">${uptimeDisplay}</td>`,
+                cpu:      `<td class="qp-td-cpu" style="text-align:right"><span class="${cpuClass} font-semibold">${cpuLabel}</span></td>`,
+                ram:      `<td class="qp-td-ram" style="text-align:right"><span class="${ramClass} font-semibold">${ramLabel}</span></td>`,
+                disk:     `<td class="qp-td-disk" style="text-align:right"><span class="${diskClass} font-semibold">${diskLabel}</span></td>`,
+                services: `<td class="qp-td-services">${servicesLabel}</td>`,
+                notes:    `<td class="qp-td-notes" title="${escapeHtml(notesText)}"><span class="qp-notes-clip">${notesDisplay}</span></td>`,
+                actions:  `<td class="qp-td-actions">${buildTableActionsMarkup(m.isLinux)}</td>`
+            };
+
+            // Assemble cells in the caller-provided column order.
+            tr.innerHTML = (columns || TABLE_COLUMNS).map(c => cellHtml[c.key] || '<td></td>').join('');
 
             // Interaction: click selects + triggers quick probe, double-click launches.
             tr.addEventListener('click', (e) => {

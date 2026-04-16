@@ -657,6 +657,47 @@ body.qp-col-resizing {
     overflow: visible;
 }
 
+/* --- Sticky-left first column ---
+   The first column (defaults to Actions) stays visible during horizontal
+   scroll. Works for whichever column the user has dragged into position 0. */
+.qp-server-table thead th:first-child,
+.qp-server-table tbody td:first-child {
+    position: sticky;
+    left: 0;
+    background: hsl(var(--b1));
+    z-index: 4;
+    box-shadow: 1px 0 0 hsl(var(--b3));
+}
+.qp-server-table thead th:first-child {
+    background: hsl(var(--b2));
+    z-index: 12; /* must beat sticky thead (10) AND sticky td (4) */
+}
+.qp-server-table tbody tr:hover td:first-child {
+    background: hsl(var(--b2));
+}
+.qp-server-table tbody tr.selected td:first-child {
+    background: hsl(var(--b1));
+    box-shadow: 1px 0 0 hsl(var(--p) / 0.4);
+}
+.qp-server-table tbody tr.refreshing td:first-child {
+    background: hsl(var(--b1));
+}
+
+/* --- Drag-to-reorder column indicators --- */
+.qp-server-table thead th[draggable="true"] {
+    cursor: grab;
+}
+.qp-server-table thead th.qp-col-dragging {
+    opacity: 0.5;
+    cursor: grabbing;
+}
+.qp-server-table thead th.qp-col-drop-before {
+    box-shadow: inset 3px 0 0 hsl(var(--p));
+}
+.qp-server-table thead th.qp-col-drop-after {
+    box-shadow: inset -3px 0 0 hsl(var(--p));
+}
+
 /* Body-attached floating action menu (shared single instance). */
 #qp-floating-actions-menu {
     position: fixed;
