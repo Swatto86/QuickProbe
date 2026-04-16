@@ -523,9 +523,9 @@
        left edge while scrolling horizontally. */
     overflow: auto;
     max-height: calc(100vh - 300px);
-    border: 1px solid hsl(var(--b3));
+    border: 1px solid oklch(var(--b3));
     border-radius: var(--rounded-box, 0.5rem);
-    background: hsl(var(--b1));
+    background: oklch(var(--b1));
 }
 
 .qp-server-table {
@@ -540,7 +540,7 @@
 }
 
 .qp-server-table thead {
-    background-color: hsl(var(--b2));
+    background-color: oklch(var(--b2));
 }
 
 /* Sticky header. Use high specificity + background-color (not the
@@ -552,14 +552,19 @@
     position: sticky;
     top: 0;
     z-index: 20;
-    background-color: hsl(var(--b2)) !important;
+    /* DaisyUI theme tokens (--b1, --b2, --bc, --p, --in) are stored as
+       oklch components (e.g. `--b2: 96.1151% 0 0`), NOT hsl. Using
+       `hsl(var(--b2))` produces an invalid color that browsers render as
+       transparent — which is exactly what made the sticky header appear
+       see-through and rows bleed over the pinned headings. Use oklch(). */
+    background-color: oklch(var(--b2)) !important;
     padding: 0.5rem 0.6rem;
     font-size: 0.78rem;
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.03em;
-    color: hsl(var(--bc) / 0.85);
-    border-bottom: 2px solid hsl(var(--b3));
+    color: oklch(var(--bc) / 0.85);
+    border-bottom: 2px solid oklch(var(--b3));
     user-select: none;
     overflow: hidden;
     white-space: nowrap;
@@ -584,11 +589,11 @@
 }
 
 .qp-server-table thead th .qp-th-label:not(.nosort):hover {
-    color: hsl(var(--p));
+    color: oklch(var(--p));
 }
 
 .qp-server-table thead th .qp-th-label.sorted {
-    color: hsl(var(--p));
+    color: oklch(var(--p));
 }
 
 /* Column resize handle on the right edge of the header */
@@ -605,7 +610,7 @@
 
 .qp-server-table thead th .qp-col-resize:hover,
 body.qp-col-resizing .qp-col-resize {
-    background: hsl(var(--p) / 0.5);
+    background: oklch(var(--p) / 0.5);
 }
 
 body.qp-col-resizing {
@@ -618,13 +623,13 @@ body.qp-col-resizing {
     font-size: 0.85rem;
     line-height: 1.25rem;
     vertical-align: middle;
-    border-bottom: 1px solid hsl(var(--b3) / 0.6);
+    border-bottom: 1px solid oklch(var(--b3) / 0.6);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
     /* Every tbody cell needs an opaque background so rows don't bleed
        through each other (and don't bleed through the sticky header). */
-    background-color: hsl(var(--b1));
+    background-color: oklch(var(--b1));
 }
 
 .qp-server-table tbody tr {
@@ -633,18 +638,18 @@ body.qp-col-resizing {
 }
 
 .qp-server-table tbody tr:hover {
-    background: hsl(var(--b2));
+    background: oklch(var(--b2));
 }
 
 .qp-server-table tbody tr.selected {
-    background: hsl(var(--p) / 0.12);
-    outline: 1px solid hsl(var(--p) / 0.4);
+    background: oklch(var(--p) / 0.12);
+    outline: 1px solid oklch(var(--p) / 0.4);
     outline-offset: -1px;
 }
 
 .qp-server-table tbody tr.refreshing {
     animation: cardRefreshPulse 1.2s ease-in-out infinite;
-    background: hsl(var(--in) / 0.08);
+    background: oklch(var(--in) / 0.08);
 }
 
 /* Notes column: allow ellipsis and hover-reveal via tooltip */
@@ -660,7 +665,7 @@ body.qp-col-resizing {
     white-space: nowrap;
     vertical-align: bottom;
     font-style: italic;
-    color: hsl(var(--bc) / 0.75);
+    color: oklch(var(--bc) / 0.75);
 }
 
 /* Actions cell: the ⚙ button opens a body-attached floating menu
@@ -671,13 +676,15 @@ body.qp-col-resizing {
 }
 
 .qp-server-table > tbody > tr:nth-child(even) > td {
-    background-color: hsl(var(--b1) / 0.6);
+    /* Subtle zebra stripe — blend b2 over b1 at low alpha so the sticky
+       first column's solid b1 background still reads as the "even" row. */
+    background-color: oklch(var(--b2) / 0.4);
 }
 .qp-server-table > tbody > tr:hover > td {
-    background-color: hsl(var(--b2));
+    background-color: oklch(var(--b2));
 }
 .qp-server-table > tbody > tr.selected > td {
-    background-color: hsl(var(--p) / 0.12);
+    background-color: oklch(var(--p) / 0.12);
 }
 
 /* Sticky-left first column overrides (must come AFTER zebra/hover so the
@@ -688,19 +695,19 @@ body.qp-col-resizing {
     position: sticky;
     left: 0;
     z-index: 5;
-    background-color: hsl(var(--b1)) !important;
-    box-shadow: 1px 0 0 hsl(var(--b3));
+    background-color: oklch(var(--b1)) !important;
+    box-shadow: 1px 0 0 oklch(var(--b3));
 }
 .qp-server-table > thead > tr > th:first-child {
-    background-color: hsl(var(--b2)) !important;
+    background-color: oklch(var(--b2)) !important;
     z-index: 25;
 }
 .qp-server-table > tbody > tr:hover > td:first-child {
-    background-color: hsl(var(--b2)) !important;
+    background-color: oklch(var(--b2)) !important;
 }
 .qp-server-table > tbody > tr.selected > td:first-child {
-    background-color: hsl(var(--p) / 0.12) !important;
-    box-shadow: 1px 0 0 hsl(var(--p) / 0.4);
+    background-color: oklch(var(--p) / 0.12) !important;
+    box-shadow: 1px 0 0 oklch(var(--p) / 0.4);
 }
 
 /* --- Drag-to-reorder column indicators --- */
@@ -722,10 +729,10 @@ body.qp-col-reordering * {
     user-select: none !important;
 }
 .qp-server-table thead th.qp-col-drop-before {
-    box-shadow: inset 3px 0 0 hsl(var(--p));
+    box-shadow: inset 3px 0 0 oklch(var(--p));
 }
 .qp-server-table thead th.qp-col-drop-after {
-    box-shadow: inset -3px 0 0 hsl(var(--p));
+    box-shadow: inset -3px 0 0 oklch(var(--p));
 }
 
 /* Body-attached floating action menu (shared single instance). */
