@@ -139,6 +139,21 @@
                             apply immediately across all windows.</span>
                     </label>
                 </div>
+                <div class="form-control mt-4">
+                    <label class="label" for="host-view-select">
+                        <span class="label-text font-medium">Default Dashboard View</span>
+                    </label>
+                    <select id="host-view-select" class="select select-bordered w-full max-w-md">
+                        <option value="cards">Cards (detailed)</option>
+                        <option value="groups">Groups</option>
+                        <option value="table">Table (spreadsheet)</option>
+                    </select>
+                    <label class="label">
+                        <span class="label-text-alt text-base-content/60">Table view shows more servers at once in a
+                            grid with resizable, sortable columns. You can also switch views from the dashboard
+                            header.</span>
+                    </label>
+                </div>
             </div>
         </div>
 
@@ -1060,7 +1075,33 @@
                 });
             }
 
-            // Track changes in all input fields
+            // Default Dashboard View selector
+            const hostViewSelect = document.getElementById('host-view-select');
+            if (hostViewSelect) {
+                // Hydrate from current bundle
+                const currentMode = settingsBundle?.qp_host_view_mode;
+                if (currentMode === 'cards' || currentMode === 'groups' || currentMode === 'table') {
+                    hostViewSelect.value = currentMode;
+                }
+                hostViewSelect.addEventListener('change', () => {
+                    const newMode = hostViewSelect.value;
+                    if (newMode !== 'cards' && newMode !== 'groups' && newMode !== 'table') return;
+                    settingsBundle.qp_host_view_mode = newMode;
+                    try {
+                        localStorage.setItem(HOST_VIEW_KEY, JSON.stringify(newMode));
+                    } catch (e) {
+                        console.warn('Failed to write qp_host_view_mode to localStorage', e);
+                    }
+                    queueSettingsSave(settingsPayload());
+                    if (window.__TAURI__?.event?.emit) {
+                        window.__TAURI__.event.emit('settings-updated', {
+                            timestamp: Date.now(),
+                            hostViewMode: newMode
+                        }).catch(err => console.warn('Failed to emit settings-updated event', err));
+                    }
+                    markSettingsDirty();
+                });
+            }
             const trackableInputs = [
                 'probe-timeout',
                 'quick-probe-timeout',

@@ -48,6 +48,12 @@ If your machine is **not joined to a domain** (e.g. a Hyper-V lab environment), 
 
 ### Dashboard Controls
 
+The dashboard supports three view modes, selectable via the **Cards / Groups / Table** buttons in the header (or set the default in **Options → Default Dashboard View**):
+
+- **Cards** — rich per-server cards with full health details and probe status.
+- **Groups** — cards organised by group, click a group to focus.
+- **Table** — compact spreadsheet-style grid with sortable, drag-resizable columns — useful for seeing many servers at once. Column widths and sort are remembered per user.
+
 Each server card has two action rows:
 
 **Row 1:**
@@ -56,6 +62,8 @@ Each server card has two action rows:
 
 **Row 2:**
 - **✏️ Edit** — Modify server settings (notes, services, group)
+
+In **Table** view, each row exposes the same actions: 🔄 Refresh, ✏️ Edit, and a ⚙️ menu identical to the card dropdown. Single-click selects a row and triggers a quick probe; double-click launches RDP (Windows) or SSH (Linux).
 
 ### Actions Menu
 

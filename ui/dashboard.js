@@ -756,7 +756,7 @@
 
         function hydrateHostViewMode() {
             const raw = settingsBundle?.qp_host_view_mode;
-            if (raw === 'cards' || raw === 'groups') {
+            if (raw === 'cards' || raw === 'groups' || raw === 'table') {
                 hostViewMode = raw;
             }
             // Restore focused group state if in groups mode
@@ -3723,12 +3723,16 @@
         }
 
         function setHostViewMode(mode) {
-            if (mode !== 'cards' && mode !== 'groups') return;
+            if (mode !== 'cards' && mode !== 'groups' && mode !== 'table') return;
             if (hostViewMode === mode) return;
             hostViewMode = mode;
             if (hostViewMode !== 'groups') {
                 focusedGroup = null;
                 settingsBundle.qp_focused_group = null;
+            }
+            // Reorder mode is card/group spatial: exit it when switching to table
+            if (hostViewMode === 'table' && reorderMode) {
+                reorderMode = false;
             }
             persistHostViewMode(mode);
             updateViewSwitcherButtons();
@@ -4153,7 +4157,7 @@
 
             // Display server cards
             grid.innerHTML = '';
-            grid.classList.remove('group-grid', 'reorder-mode');
+            grid.classList.remove('group-grid', 'reorder-mode', 'table-view');
 
             // Add reorder mode banner if active
             const existingBanner = document.querySelector('.reorder-mode-banner');
@@ -4183,6 +4187,8 @@
 
             if (hostViewMode === 'groups') {
                 renderGroupView(filteredServers, grid);
+            } else if (hostViewMode === 'table') {
+                renderTableView(filteredServers, grid);
             } else {
                 filteredServers.forEach(server => {
                     const card = createServerCard(server, { compact: reorderMode });
@@ -4195,6 +4201,8 @@
             if (hostViewMode === 'groups') {
                 grid.classList.add('group-grid');
                 if (reorderMode) grid.classList.add('reorder-mode');
+            } else if (hostViewMode === 'table') {
+                grid.classList.add('table-view');
             }
             grid.classList.remove('hidden');
             updateSearchMeta(filteredServers.length);
@@ -5447,6 +5455,602 @@
             }
 
             return card;
+        }
+
+        // ============================================================
+        // Table (spreadsheet-style) view
+        // ============================================================
+
+        // Column definitions for the table view. `key` is used as dataset attributes
+        // and for sort/resize state. `width` is the initial column width in pixels.
+        const TABLE_COLUMNS = [
+            { key: 'status',   label: 'Status',    width: 80,  align: 'center' },
+            { key: 'name',     label: 'Host',      width: 200, align: 'left' },
+            { key: 'os',       label: 'OS',        width: 90,  align: 'left' },
+            { key: 'group',    label: 'Group',     width: 130, align: 'left' },
+            { key: 'location', label: 'Location',  width: 140, align: 'left' },
+            { key: 'ip',       label: 'IP',        width: 130, align: 'left' },
+            { key: 'uptime',   label: 'Uptime',    width: 110, align: 'left' },
+            { key: 'cpu',      label: 'CPU %',     width: 80,  align: 'right' },
+            { key: 'ram',      label: 'RAM %',     width: 110, align: 'right' },
+            { key: 'disk',     label: 'Disk Free', width: 110, align: 'right' },
+            { key: 'services', label: 'Services',  width: 140, align: 'left' },
+            { key: 'notes',    label: 'Notes',     width: 220, align: 'left' },
+            { key: 'actions',  label: 'Actions',   width: 240, align: 'left', nosort: true }
+        ];
+        const TABLE_COL_WIDTHS_KEY = 'qp_table_col_widths';
+        const TABLE_SORT_KEY = 'qp_table_sort';
+        let tableSortState = loadTableSort();
+
+        function loadTableColWidths() {
+            try {
+                const raw = localStorage.getItem(TABLE_COL_WIDTHS_KEY);
+                if (!raw) return {};
+                const parsed = JSON.parse(raw);
+                return (parsed && typeof parsed === 'object') ? parsed : {};
+            } catch (e) {
+                return {};
+            }
+        }
+
+        function saveTableColWidths(widths) {
+            try {
+                localStorage.setItem(TABLE_COL_WIDTHS_KEY, JSON.stringify(widths));
+            } catch (e) {
+                console.warn('Failed to save table column widths', e);
+            }
+        }
+
+        function loadTableSort() {
+            try {
+                const raw = localStorage.getItem(TABLE_SORT_KEY);
+                if (!raw) return { key: null, asc: true };
+                const parsed = JSON.parse(raw);
+                if (parsed && typeof parsed.key === 'string') {
+                    return { key: parsed.key, asc: parsed.asc !== false };
+                }
+            } catch (e) { /* ignore */ }
+            return { key: null, asc: true };
+        }
+
+        function saveTableSort() {
+            try {
+                localStorage.setItem(TABLE_SORT_KEY, JSON.stringify(tableSortState));
+            } catch (e) {
+                console.warn('Failed to save table sort state', e);
+            }
+        }
+
+        // Extracts the subset of display fields needed for a table row.
+        // Intentionally mirrors the logic used in createServerCard but only
+        // computes what the table renders.
+        function computeTableRowMetrics(server) {
+            const data = server.data || {};
+            const heartbeat = server.heartbeat || null;
+
+            // Uptime
+            const heartbeatUptime = typeof heartbeat?.uptime_hours === 'number' ? heartbeat.uptime_hours : null;
+            const dataUptime = typeof data.uptime?.uptime_hours === 'number' ? data.uptime.uptime_hours : null;
+            const uptimeValue = dataUptime !== null ? dataUptime : heartbeatUptime;
+
+            // CPU %
+            const heartbeatCpu = typeof heartbeat?.cpu_load_pct === 'number' ? heartbeat.cpu_load_pct : null;
+            const dataCpu = typeof data.uptime?.cpu_load_pct === 'number' ? data.uptime.cpu_load_pct : null;
+            const cpuValue = dataCpu !== null ? dataCpu : heartbeatCpu;
+
+            // RAM %
+            const heartbeatMem = typeof heartbeat?.memory_used_percent === 'number' ? heartbeat.memory_used_percent : null;
+            const memValue = typeof data.memory_used_percent === 'number' ? data.memory_used_percent : heartbeatMem;
+            const totalMemMb = typeof data.total_memory_mb === 'number' ? data.total_memory_mb : 0;
+            const totalMemGb = totalMemMb > 0 ? Math.round((totalMemMb / 1024) * 10) / 10 : null;
+
+            // Worst disk (lowest percent free)
+            let worstDiskPct = null;
+            let worstDiskDrive = '';
+            if (Array.isArray(data.disks) && data.disks.length > 0) {
+                for (const d of data.disks) {
+                    const pct = typeof d.percent_free === 'number' ? d.percent_free : null;
+                    if (pct === null) continue;
+                    if (worstDiskPct === null || pct < worstDiskPct) {
+                        worstDiskPct = pct;
+                        worstDiskDrive = d.drive || '';
+                    }
+                }
+            }
+
+            // Services summary
+            const rawServiceStatus = Array.isArray(data.service_status)
+                ? data.service_status
+                : (data.service_status ? [data.service_status] : []);
+            const serviceStatus = rawServiceStatus.filter(s => s?.status && s.status.toLowerCase() !== 'notfound');
+            const runningCount = serviceStatus.filter(s => (s.status || '').toLowerCase() === 'running').length;
+            const stoppedCount = serviceStatus.length - runningCount;
+
+            // Primary IP (reuse same primary-adapter heuristic as cards, simplified)
+            let primaryIp = '';
+            const adapters = Array.isArray(data.net_adapters) ? data.net_adapters : [];
+            if (adapters.length > 0) {
+                const scored = adapters.map((a, idx) => {
+                    const ipv4 = Array.isArray(a.ipv4) ? a.ipv4.filter(x => typeof x === 'string' && x.trim()) : [];
+                    const ipv6 = Array.isArray(a.ipv6) ? a.ipv6.filter(x => typeof x === 'string' && x.trim()) : [];
+                    const gateway = Array.isArray(a.gateway) ? a.gateway.filter(x => typeof x === 'string' && x.trim()) : [];
+                    const score = (ipv4.length ? 10 : 0) + (gateway.length ? 5 : 0);
+                    return { ipv4, ipv6, score, order: idx };
+                }).sort((a, b) => b.score - a.score || a.order - b.order);
+                const best = scored[0];
+                if (best) {
+                    primaryIp = (best.ipv4[0] || best.ipv6[0] || '').trim();
+                }
+            }
+
+            const rawOs = server.os_type || server.os || server.osType || 'Windows';
+            const osType = Utils?.normalizeOsType ? Utils.normalizeOsType(rawOs) : rawOs;
+
+            return {
+                online: !!server.online,
+                osType,
+                isLinux: osType.toLowerCase() === 'linux',
+                group: (server.group || '').trim(),
+                location: server.location || '',
+                notes: server.notes || '',
+                primaryIp,
+                uptimeValue,
+                uptimeLabel: Number.isFinite(uptimeValue) ? humanizeUptime(uptimeValue) : '',
+                cpuValue,
+                memValue,
+                totalMemGb,
+                worstDiskPct,
+                worstDiskDrive,
+                runningCount,
+                stoppedCount,
+                pendingReboot: !!data.pending_reboot?.pending,
+                winrmIssue: heartbeat && heartbeat.winrm_ok === false && heartbeat.ping_ok
+            };
+        }
+
+        // Returns a comparable value for the given server/column used by sort.
+        function getTableSortValue(server, key) {
+            const m = computeTableRowMetrics(server);
+            switch (key) {
+                case 'status':   return m.online ? 1 : 0;
+                case 'name':     return (server.name || '').toLowerCase();
+                case 'os':       return (m.osType || '').toLowerCase();
+                case 'group':    return (m.group || '').toLowerCase();
+                case 'location': return (m.location || '').toLowerCase();
+                case 'ip':       return (m.primaryIp || '').toLowerCase();
+                case 'uptime':   return Number.isFinite(m.uptimeValue) ? m.uptimeValue : -1;
+                case 'cpu':      return Number.isFinite(m.cpuValue) ? m.cpuValue : -1;
+                case 'ram':      return Number.isFinite(m.memValue) ? m.memValue : -1;
+                case 'disk':     return (m.worstDiskPct !== null) ? m.worstDiskPct : 999;
+                case 'services': return -m.stoppedCount; // more stopped = "worse" (sorts last asc)
+                case 'notes':    return (m.notes || '').toLowerCase();
+                default:         return 0;
+            }
+        }
+
+        // Build the Actions cell markup. The ⚙ button opens a body-attached
+        // floating menu (see openTableActionsMenu) so it is not clipped by the
+        // scrollable table wrapper or the cell's overflow:hidden.
+        function buildTableActionsMarkup(isLinux) {
+            return `
+                <div class="qp-table-actions flex gap-1 items-center flex-nowrap">
+                    <button class="btn btn-xs btn-primary refresh-btn" type="button" title="Refresh this host">🔄</button>
+                    <button class="btn btn-xs btn-ghost edit-host-btn" type="button" title="Edit host">✏️</button>
+                    <button class="btn btn-xs qp-table-menu-btn" type="button" title="More actions" data-is-linux="${isLinux ? '1' : '0'}">⚙️ ▾</button>
+                </div>
+            `;
+        }
+
+        // Wire action button handlers on an arbitrary root element. The Refresh
+        // and Edit buttons live directly in the actions cell; the ⚙ menu opens a
+        // separate floating menu that wires its own handlers on open.
+        function wireServerActionHandlers(rootEl, server, isLinux) {
+            if (!rootEl) return;
+            const stop = (e) => { e.stopPropagation(); e.preventDefault(); };
+
+            const refreshBtn = rootEl.querySelector('.refresh-btn');
+            if (refreshBtn) {
+                refreshBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    if (refreshBtn.disabled) return;
+                    refreshBtn.disabled = true;
+                    refreshBtn.textContent = '⏳';
+                    refreshServer(server.name, refreshBtn);
+                });
+            }
+
+            const editBtn = rootEl.querySelector('.edit-host-btn');
+            if (editBtn) editBtn.addEventListener('click', (e) => { stop(e); editHost(server.name); });
+
+            const menuBtn = rootEl.querySelector('.qp-table-menu-btn');
+            if (menuBtn) {
+                menuBtn.addEventListener('click', (e) => {
+                    stop(e);
+                    openTableActionsMenu(menuBtn, server, isLinux);
+                });
+            }
+        }
+
+        // Floating table-actions menu (single shared instance attached to <body>
+        // so it escapes the scrollable table wrapper and any overflow:hidden
+        // cells). Re-populated per-click with the target server's context.
+        let qpFloatingMenuEl = null;
+        let qpFloatingMenuCleanup = null;
+
+        function ensureFloatingMenuEl() {
+            if (qpFloatingMenuEl && document.body.contains(qpFloatingMenuEl)) return qpFloatingMenuEl;
+            const el = document.createElement('ul');
+            el.id = 'qp-floating-actions-menu';
+            el.className = 'menu bg-base-200 rounded-box shadow-lg border border-base-300 p-2';
+            el.setAttribute('role', 'menu');
+            el.style.display = 'none';
+            document.body.appendChild(el);
+            qpFloatingMenuEl = el;
+            return el;
+        }
+
+        function closeTableActionsMenu() {
+            if (!qpFloatingMenuEl) return;
+            qpFloatingMenuEl.style.display = 'none';
+            qpFloatingMenuEl.innerHTML = '';
+            if (qpFloatingMenuCleanup) {
+                qpFloatingMenuCleanup();
+                qpFloatingMenuCleanup = null;
+            }
+        }
+
+        function openTableActionsMenu(anchorBtn, server, isLinux) {
+            const menu = ensureFloatingMenuEl();
+            // Toggle off if the same anchor is clicked again.
+            if (menu.style.display === 'block' && menu.dataset.anchorServer === server.name) {
+                closeTableActionsMenu();
+                return;
+            }
+            closeTableActionsMenu();
+            menu.dataset.anchorServer = server.name;
+
+            menu.innerHTML = `
+                <li><a data-action="set-creds" class="whitespace-nowrap">🔑 Set Host Credentials</a></li>
+                <li><hr class="my-1 border-t border-base-300 opacity-80"></li>
+                <li class="menu-title text-xs opacity-80 font-bold">Remote Access</li>
+                <li><a data-action="remote-shell" class="whitespace-nowrap">${isLinux ? '🐧 Remote SSH' : '💻 Remote PowerShell'}</a></li>
+                ${!isLinux ? '<li><a data-action="explore-share" class="whitespace-nowrap">📁 Explore C$</a></li>' : ''}
+                <li><hr class="my-1 border-t border-base-300 opacity-80"></li>
+                <li class="menu-title text-xs opacity-80 font-bold">Management</li>
+                <li><a data-action="manage-services" class="whitespace-nowrap">${isLinux ? '🐧 Manage Services (systemd)' : '🔧 Manage Services'}</a></li>
+                <li><a data-action="manage-processes" class="whitespace-nowrap">${isLinux ? '🐧 Manage Processes (top)' : '📊 Manage Processes'}</a></li>
+                ${!isLinux ? `
+                <li><hr class="my-1 border-t border-base-300 opacity-80"></li>
+                <li class="menu-title text-xs opacity-80 font-bold">System Tools</li>
+                <li><a data-action="remote-registry" class="whitespace-nowrap">🗝️ Remote Registry</a></li>
+                <li><a data-action="stop-remote-registry" class="whitespace-nowrap">🗝️ Stop Remote Registry</a></li>
+                ` : ''}
+                <li><hr class="my-1 border-t border-base-300 opacity-80"></li>
+                <li class="menu-title text-xs opacity-80 font-bold">Power Management</li>
+                <li><a data-action="restart" class="whitespace-nowrap">🔄 Restart Server</a></li>
+                <li><a data-action="shutdown" class="whitespace-nowrap">⏹️ Shutdown Server</a></li>
+                <li><hr class="my-1 border-t border-base-300 opacity-80"></li>
+                <li><a data-action="details" class="whitespace-nowrap">🔍 View Details</a></li>
+            `;
+
+            // Position: prefer below button; flip above if it would overflow viewport.
+            // Display first (hidden via visibility) to measure.
+            menu.style.display = 'block';
+            menu.style.visibility = 'hidden';
+            menu.style.position = 'fixed';
+            menu.style.zIndex = '9999';
+            menu.style.minWidth = '18rem';
+
+            const rect = anchorBtn.getBoundingClientRect();
+            const menuRect = menu.getBoundingClientRect();
+            const vw = window.innerWidth;
+            const vh = window.innerHeight;
+            const gap = 4;
+
+            // Horizontal: right-align to the button but clamp to viewport.
+            let left = rect.right - menuRect.width;
+            if (left < 8) left = 8;
+            if (left + menuRect.width > vw - 8) left = vw - menuRect.width - 8;
+
+            // Vertical: below if space, else above.
+            let top = rect.bottom + gap;
+            if (top + menuRect.height > vh - 8) {
+                top = rect.top - menuRect.height - gap;
+                if (top < 8) top = 8;
+            }
+
+            menu.style.left = `${Math.round(left)}px`;
+            menu.style.top = `${Math.round(top)}px`;
+            menu.style.visibility = 'visible';
+
+            const handleAction = (e) => {
+                const a = e.target.closest('a[data-action]');
+                if (!a) return;
+                e.preventDefault();
+                e.stopPropagation();
+                const action = a.dataset.action;
+                closeTableActionsMenu();
+                switch (action) {
+                    case 'set-creds':             setHostCredentials(server.name); break;
+                    case 'remote-shell':
+                        if (isLinux) openRemoteSshModal(server.name);
+                        else openRemotePowerShellModal(server.name);
+                        break;
+                    case 'explore-share':
+                        (async () => {
+                            try {
+                                await window.__TAURI__.core.invoke('open_explorer_share', { server: server.name });
+                                showInfo(`Opening Explorer to \\\\${server.name}\\C$`);
+                            } catch (err) {
+                                showError(`Failed to open Explorer: ${err}`);
+                            }
+                        })();
+                        break;
+                    case 'manage-services':       openManageServicesModal(server.name); break;
+                    case 'manage-processes':      openManageProcessesModal(server.name); break;
+                    case 'remote-registry':       startRemoteRegistry(server.name); break;
+                    case 'stop-remote-registry':  stopRemoteRegistry(server.name); break;
+                    case 'restart':               restartServer(server.name); break;
+                    case 'shutdown':              shutdownServer(server.name); break;
+                    case 'details':
+                        if (typeof openDetailsDialog === 'function') openDetailsDialog(server);
+                        break;
+                }
+            };
+
+            const onDocMouseDown = (e) => {
+                if (menu.contains(e.target) || anchorBtn.contains(e.target)) return;
+                closeTableActionsMenu();
+            };
+            const onKey = (e) => {
+                if (e.key === 'Escape') closeTableActionsMenu();
+            };
+            const onScroll = () => closeTableActionsMenu();
+            const onResize = () => closeTableActionsMenu();
+
+            menu.addEventListener('click', handleAction);
+            document.addEventListener('mousedown', onDocMouseDown, true);
+            document.addEventListener('keydown', onKey, true);
+            // Close on any scroll (wrapper or window) so menu doesn't float away.
+            window.addEventListener('scroll', onScroll, true);
+            window.addEventListener('resize', onResize);
+
+            qpFloatingMenuCleanup = () => {
+                menu.removeEventListener('click', handleAction);
+                document.removeEventListener('mousedown', onDocMouseDown, true);
+                document.removeEventListener('keydown', onKey, true);
+                window.removeEventListener('scroll', onScroll, true);
+                window.removeEventListener('resize', onResize);
+                delete menu.dataset.anchorServer;
+            };
+        }
+
+        function renderTableView(servers, container) {
+            const savedWidths = loadTableColWidths();
+            const columns = TABLE_COLUMNS.map(c => ({
+                ...c,
+                width: Number(savedWidths[c.key]) > 20 ? Number(savedWidths[c.key]) : c.width
+            }));
+
+            // Sort servers according to current sort state.
+            let rows = servers.slice();
+            if (tableSortState.key) {
+                const dir = tableSortState.asc ? 1 : -1;
+                rows.sort((a, b) => {
+                    const va = getTableSortValue(a, tableSortState.key);
+                    const vb = getTableSortValue(b, tableSortState.key);
+                    if (va < vb) return -1 * dir;
+                    if (va > vb) return 1 * dir;
+                    return 0;
+                });
+            }
+
+            const wrapper = document.createElement('div');
+            wrapper.className = 'qp-table-wrapper';
+
+            const table = document.createElement('table');
+            table.className = 'qp-server-table table table-zebra table-sm';
+
+            // <colgroup> drives column widths so resizing only updates <col>.
+            const colgroup = document.createElement('colgroup');
+            columns.forEach(col => {
+                const c = document.createElement('col');
+                c.dataset.key = col.key;
+                c.style.width = `${col.width}px`;
+                colgroup.appendChild(c);
+            });
+            table.appendChild(colgroup);
+
+            // Header with sort + resize handles.
+            const thead = document.createElement('thead');
+            const headerRow = document.createElement('tr');
+            columns.forEach(col => {
+                const th = document.createElement('th');
+                th.dataset.key = col.key;
+                th.className = `qp-th-${col.key}`;
+                if (col.align === 'right') th.style.textAlign = 'right';
+                if (col.align === 'center') th.style.textAlign = 'center';
+
+                const labelBtn = document.createElement('button');
+                labelBtn.type = 'button';
+                labelBtn.className = 'qp-th-label';
+                labelBtn.textContent = col.label;
+                if (col.nosort) {
+                    labelBtn.disabled = true;
+                    labelBtn.classList.add('nosort');
+                } else if (tableSortState.key === col.key) {
+                    labelBtn.classList.add('sorted');
+                    labelBtn.textContent = `${col.label} ${tableSortState.asc ? '▲' : '▼'}`;
+                }
+                if (!col.nosort) {
+                    labelBtn.addEventListener('click', () => {
+                        if (tableSortState.key === col.key) {
+                            tableSortState.asc = !tableSortState.asc;
+                        } else {
+                            tableSortState = { key: col.key, asc: true };
+                        }
+                        saveTableSort();
+                        displayAllServers();
+                    });
+                }
+                th.appendChild(labelBtn);
+
+                // Resize handle (not on the last column)
+                const handle = document.createElement('span');
+                handle.className = 'qp-col-resize';
+                handle.addEventListener('mousedown', (e) => startColResize(e, col.key, colgroup));
+                th.appendChild(handle);
+
+                headerRow.appendChild(th);
+            });
+            thead.appendChild(headerRow);
+            table.appendChild(thead);
+
+            // Body
+            const tbody = document.createElement('tbody');
+            rows.forEach(server => {
+                tbody.appendChild(createServerRow(server));
+            });
+            table.appendChild(tbody);
+
+            wrapper.appendChild(table);
+            container.appendChild(wrapper);
+
+            if (rows.length === 0) {
+                const empty = document.createElement('div');
+                empty.className = 'empty-state';
+                empty.textContent = 'No servers match your search.';
+                container.appendChild(empty);
+            }
+        }
+
+        function createServerRow(server) {
+            const m = computeTableRowMetrics(server);
+            const tr = document.createElement('tr');
+            tr.className = 'qp-server-row';
+            tr.dataset.serverName = server.name;
+
+            // Preserve refreshing state visually across re-renders
+            const normalized = normalizeHostName(server.name);
+            const refreshState = fullRefreshMeta.get(normalized);
+            if (normalized && refreshState?.inFlight) {
+                tr.classList.add('refreshing');
+            }
+
+            const statusTone = m.online ? 'text-success' : 'text-error';
+            const statusLabel = m.online ? '● ONLINE' : '● OFFLINE';
+            const osEmoji = m.isLinux ? '🐧' : '🖥️';
+
+            const cpuClass = Number.isFinite(m.cpuValue)
+                ? (m.cpuValue >= 90 ? 'text-error' : m.cpuValue >= 70 ? 'text-warning' : 'text-success')
+                : 'text-base-content/60';
+            const cpuLabel = Number.isFinite(m.cpuValue) ? `${Math.round(m.cpuValue)}%` : '—';
+
+            const ramClass = Number.isFinite(m.memValue)
+                ? (m.memValue >= 80 ? 'text-error' : m.memValue >= 65 ? 'text-warning' : 'text-success')
+                : 'text-base-content/60';
+            const ramLabel = Number.isFinite(m.memValue)
+                ? `${Math.round(m.memValue)}%${m.totalMemGb ? ` / ${m.totalMemGb} GB` : ''}`
+                : '—';
+
+            let diskClass = 'text-base-content/60';
+            let diskLabel = '—';
+            if (m.worstDiskPct !== null) {
+                const pct = Math.round(m.worstDiskPct * 10) / 10;
+                diskClass = pct < 10 ? 'text-error' : pct < 20 ? 'text-warning' : 'text-success';
+                diskLabel = `${m.worstDiskDrive ? m.worstDiskDrive + ' ' : ''}${pct}% free`;
+            }
+
+            const servicesLabel = (m.runningCount + m.stoppedCount) === 0
+                ? '—'
+                : `<span class="text-success">${m.runningCount}✓</span>${m.stoppedCount > 0 ? ` <span class="text-error">${m.stoppedCount}✗</span>` : ''}`;
+
+            const pendingBadge = m.pendingReboot
+                ? ' <span class="badge badge-warning badge-xs" title="Reboot pending">⟳</span>' : '';
+            const winrmBadge = (!m.isLinux && m.winrmIssue && m.online)
+                ? ' <span class="badge badge-warning badge-xs" title="WinRM issue">⚠</span>' : '';
+
+            const notesText = m.notes ? m.notes : '';
+            const notesDisplay = notesText ? highlightMatch(notesText, searchTerm) : '';
+
+            const highlightedName = highlightMatch(server.name, searchTerm);
+            const locationDisplay = m.location ? highlightMatch(m.location, searchTerm) : '<span class="text-base-content/40">—</span>';
+            const groupDisplay = m.group ? highlightMatch(m.group, searchTerm) : '<span class="text-base-content/40">—</span>';
+            const ipDisplay = m.primaryIp ? highlightMatch(m.primaryIp, searchTerm) : '<span class="text-base-content/40">—</span>';
+            const uptimeDisplay = m.uptimeLabel ? escapeHtml(m.uptimeLabel) : '<span class="text-base-content/40">—</span>';
+
+            tr.innerHTML = `
+                <td class="qp-td-status" style="text-align:center" title="${m.online ? 'Online' : 'Offline'}">
+                    <span class="${statusTone} font-bold text-xs whitespace-nowrap">${statusLabel}</span>
+                </td>
+                <td class="qp-td-name" title="${escapeHtml(server.name)}">
+                    <span class="font-semibold">${highlightedName}</span>${pendingBadge}${winrmBadge}
+                </td>
+                <td class="qp-td-os">
+                    <span class="whitespace-nowrap">${osEmoji} ${escapeHtml(m.osType)}</span>
+                </td>
+                <td class="qp-td-group" title="${escapeHtml(m.group)}">${groupDisplay}</td>
+                <td class="qp-td-location" title="${escapeHtml(m.location || '')}">${locationDisplay}</td>
+                <td class="qp-td-ip">${ipDisplay}</td>
+                <td class="qp-td-uptime">${uptimeDisplay}</td>
+                <td class="qp-td-cpu" style="text-align:right"><span class="${cpuClass} font-semibold">${cpuLabel}</span></td>
+                <td class="qp-td-ram" style="text-align:right"><span class="${ramClass} font-semibold">${ramLabel}</span></td>
+                <td class="qp-td-disk" style="text-align:right"><span class="${diskClass} font-semibold">${diskLabel}</span></td>
+                <td class="qp-td-services">${servicesLabel}</td>
+                <td class="qp-td-notes" title="${escapeHtml(notesText)}"><span class="qp-notes-clip">${notesDisplay}</span></td>
+                <td class="qp-td-actions">${buildTableActionsMarkup(m.isLinux)}</td>
+            `;
+
+            // Interaction: click selects + triggers quick probe, double-click launches.
+            tr.addEventListener('click', (e) => {
+                if (e.target.closest('button, a, input, textarea, select, option, .dropdown')) return;
+                selectedServerName = server.name;
+                document.querySelectorAll('.qp-server-row.selected').forEach(r => r.classList.remove('selected'));
+                tr.classList.add('selected');
+                triggerQuickProbe(server.name, 'row-click');
+            });
+            tr.addEventListener('dblclick', (e) => {
+                if (e.target.closest('button, a, input, textarea, select, option, .dropdown')) return;
+                if (m.isLinux) { launchSsh(server.name); } else { launchRdp(server.name); }
+            });
+
+            // Wire all action button handlers.
+            wireServerActionHandlers(tr, server, m.isLinux);
+
+            return tr;
+        }
+
+        // Mouse-drag column resize. Updates the corresponding <col> in the
+        // colgroup and persists the width to localStorage on mouseup.
+        function startColResize(e, colKey, colgroup) {
+            e.preventDefault();
+            e.stopPropagation();
+            const colEl = colgroup.querySelector(`col[data-key="${colKey}"]`);
+            if (!colEl) return;
+            const startX = e.clientX;
+            const startWidth = colEl.getBoundingClientRect().width;
+            const MIN_WIDTH = 40;
+            document.body.classList.add('qp-col-resizing');
+
+            const onMove = (ev) => {
+                const dx = ev.clientX - startX;
+                const w = Math.max(MIN_WIDTH, Math.round(startWidth + dx));
+                colEl.style.width = `${w}px`;
+            };
+            const onUp = () => {
+                document.body.classList.remove('qp-col-resizing');
+                document.removeEventListener('mousemove', onMove);
+                document.removeEventListener('mouseup', onUp);
+                // Persist all widths (not just this column) so changes are saved.
+                const widths = {};
+                colgroup.querySelectorAll('col').forEach(c => {
+                    const w = c.getBoundingClientRect().width;
+                    if (c.dataset.key && w > 0) widths[c.dataset.key] = Math.round(w);
+                });
+                saveTableColWidths(widths);
+            };
+            document.addEventListener('mousemove', onMove);
+            document.addEventListener('mouseup', onUp);
         }
 
         async function editServerNotes(serverName, currentNotes) {

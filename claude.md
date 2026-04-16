@@ -22,6 +22,7 @@ one-click RDP, service/process management, and encrypted backup/restore — all 
 | **Login Mode** | Either "domain" (default — full `PrincipalContext` validation against a domain controller) or "local" (format-only validation, no DC required). Tracked in the KV store via `qp_login_mode`. |
 | **Backup Payload** | A schema-versioned, AES-256-encrypted ZIP containing hosts, KV settings, and runtime mode metadata. |
 | **KV Store** | SQLite-backed key-value persistence for dashboard settings, server order, and cached state. |
+| **Dashboard View Mode** | One of `cards`, `groups`, or `table`. Persisted as `qp_host_view_mode` in the KV store and mirrored in `localStorage` for cross-window sync. Configurable from Options → Default Dashboard View and from the dashboard header view switcher. Table view supports drag-resizable columns (persisted to `qp_table_col_widths`) and sortable columns (persisted to `qp_table_sort`). |
 
 ---
 
