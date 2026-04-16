@@ -5882,7 +5882,13 @@
             wrapper.className = 'qp-table-wrapper';
 
             const table = document.createElement('table');
-            table.className = 'qp-server-table table table-zebra table-sm';
+            // NB: do NOT add DaisyUI `table table-zebra table-sm` classes here —
+            // their :where()-based rules set `background-color` on thead/tbody
+            // cells using CSS variables we don't fully control, and were
+            // causing sticky headers to appear transparent (rows bled through
+            // the pinned header). Our own styles in dashboard-minimal.css
+            // fully replicate the look.
+            table.className = 'qp-server-table';
 
             // <colgroup> drives column widths so resizing only updates <col>.
             const colgroup = document.createElement('colgroup');

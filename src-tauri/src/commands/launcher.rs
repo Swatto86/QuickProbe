@@ -80,8 +80,11 @@ pub(crate) fn build_rdp_content(host: &str, username: &str, domain: &str) -> Str
             "full address:s:{host}\r\n",
             "compression:i:1\r\n",
             "keyboardhook:i:2\r\n",
-            "audiocapturemode:i:1\r\n",
-            "videoplaybackmode:i:1\r\n",
+            // Disable audio capture & video playback redirection (these are
+            // the primary triggers for the "allow access to microphones /
+            // recording devices" consent prompt).
+            "audiocapturemode:i:0\r\n",
+            "videoplaybackmode:i:0\r\n",
             "connection type:i:2\r\n",
             "networkautodetect:i:1\r\n",
             "bandwidthautodetect:i:1\r\n",
@@ -95,13 +98,24 @@ pub(crate) fn build_rdp_content(host: &str, username: &str, domain: &str) -> Str
             "disable cursor setting:i:0\r\n",
             "bitmapcachepersistenable:i:1\r\n",
             "audiomode:i:0\r\n",
-            "redirectprinters:i:1\r\n",
+            // Device redirections — all OFF by default to silence the
+            // "Allow the remote computer to access the following resources"
+            // consent dialog on Windows 11. Users who need printer/clipboard/
+            // smartcard redirection can edit the generated .rdp file.
+            "redirectprinters:i:0\r\n",
             "redirectcomports:i:0\r\n",
-            "redirectsmartcards:i:1\r\n",
-            "redirectclipboard:i:1\r\n",
+            "redirectsmartcards:i:0\r\n",
+            "redirectclipboard:i:0\r\n",
             "redirectposdevices:i:0\r\n",
+            "redirectwebauthn:i:0\r\n",
+            "devicestoredirect:s:\r\n",
+            "drivestoredirect:s:\r\n",
+            "usbdevicestoredirect:s:\r\n",
             "autoreconnection enabled:i:1\r\n",
-            "authentication level:i:0\r\n",
+            // authentication level 2 = Server auth required (no warning if
+            // cert is trusted; modern Windows shows a softer prompt for
+            // untrusted certs than level 0 does).
+            "authentication level:i:2\r\n",
             "prompt for credentials:i:0\r\n",
             "negotiate security layer:i:1\r\n",
             "remoteapplicationmode:i:0\r\n",

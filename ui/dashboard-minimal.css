@@ -622,6 +622,9 @@ body.qp-col-resizing {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    /* Every tbody cell needs an opaque background so rows don't bleed
+       through each other (and don't bleed through the sticky header). */
+    background-color: hsl(var(--b1));
 }
 
 .qp-server-table tbody tr {
@@ -667,31 +670,37 @@ body.qp-col-resizing {
     overflow: visible;
 }
 
-/* --- Sticky-left first column ---
-   The first column (defaults to Actions) stays visible during horizontal
-   scroll. Works for whichever column the user has dragged into position 0. */
+.qp-server-table > tbody > tr:nth-child(even) > td {
+    background-color: hsl(var(--b1) / 0.6);
+}
+.qp-server-table > tbody > tr:hover > td {
+    background-color: hsl(var(--b2));
+}
+.qp-server-table > tbody > tr.selected > td {
+    background-color: hsl(var(--p) / 0.12);
+}
+
+/* Sticky-left first column overrides (must come AFTER zebra/hover so the
+   sticky cell still wins on horizontal scroll). */
 .qp-server-table > thead > tr > th:first-child,
 .qp-server-table > tbody > tr > td:first-child {
     position: -webkit-sticky;
     position: sticky;
     left: 0;
+    z-index: 5;
     background-color: hsl(var(--b1)) !important;
-    z-index: 4;
     box-shadow: 1px 0 0 hsl(var(--b3));
 }
 .qp-server-table > thead > tr > th:first-child {
     background-color: hsl(var(--b2)) !important;
-    z-index: 25; /* must beat sticky thead th (20) AND sticky body td (4) */
+    z-index: 25;
 }
 .qp-server-table > tbody > tr:hover > td:first-child {
     background-color: hsl(var(--b2)) !important;
 }
 .qp-server-table > tbody > tr.selected > td:first-child {
-    background-color: hsl(var(--b1)) !important;
+    background-color: hsl(var(--p) / 0.12) !important;
     box-shadow: 1px 0 0 hsl(var(--p) / 0.4);
-}
-.qp-server-table > tbody > tr.refreshing > td:first-child {
-    background-color: hsl(var(--b1)) !important;
 }
 
 /* --- Drag-to-reorder column indicators --- */
