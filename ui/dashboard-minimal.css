@@ -540,18 +540,19 @@
 }
 
 .qp-server-table thead {
-    background: hsl(var(--b2));
+    background-color: hsl(var(--b2));
 }
 
-.qp-server-table thead th {
-    /* Sticky is applied per-<th>, not to <thead>, because Chromium applies
-       `position: sticky` inconsistently on <thead> itself (especially with
-       table-layout: fixed). Per-cell sticky works reliably. */
+/* Sticky header. Use high specificity + background-color (not the
+   background shorthand) + !important so DaisyUI's .table/.table-zebra
+   cannot override this and leave a transparent thead that lets rows
+   bleed through when scrolled. */
+.qp-server-table > thead > tr > th {
+    position: -webkit-sticky;
     position: sticky;
     top: 0;
-    z-index: 10;
-    position: -webkit-sticky; /* older WebKit */
-    /* Non-sticky bits */
+    z-index: 20;
+    background-color: hsl(var(--b2)) !important;
     padding: 0.5rem 0.6rem;
     font-size: 0.78rem;
     font-weight: 700;
@@ -559,7 +560,6 @@
     letter-spacing: 0.03em;
     color: hsl(var(--bc) / 0.85);
     border-bottom: 2px solid hsl(var(--b3));
-    background: hsl(var(--b2));
     user-select: none;
     overflow: hidden;
     white-space: nowrap;
@@ -670,27 +670,28 @@ body.qp-col-resizing {
 /* --- Sticky-left first column ---
    The first column (defaults to Actions) stays visible during horizontal
    scroll. Works for whichever column the user has dragged into position 0. */
-.qp-server-table thead th:first-child,
-.qp-server-table tbody td:first-child {
+.qp-server-table > thead > tr > th:first-child,
+.qp-server-table > tbody > tr > td:first-child {
+    position: -webkit-sticky;
     position: sticky;
     left: 0;
-    background: hsl(var(--b1));
+    background-color: hsl(var(--b1)) !important;
     z-index: 4;
     box-shadow: 1px 0 0 hsl(var(--b3));
 }
-.qp-server-table thead th:first-child {
-    background: hsl(var(--b2));
-    z-index: 12; /* must beat sticky thead (10) AND sticky td (4) */
+.qp-server-table > thead > tr > th:first-child {
+    background-color: hsl(var(--b2)) !important;
+    z-index: 25; /* must beat sticky thead th (20) AND sticky body td (4) */
 }
-.qp-server-table tbody tr:hover td:first-child {
-    background: hsl(var(--b2));
+.qp-server-table > tbody > tr:hover > td:first-child {
+    background-color: hsl(var(--b2)) !important;
 }
-.qp-server-table tbody tr.selected td:first-child {
-    background: hsl(var(--b1));
+.qp-server-table > tbody > tr.selected > td:first-child {
+    background-color: hsl(var(--b1)) !important;
     box-shadow: 1px 0 0 hsl(var(--p) / 0.4);
 }
-.qp-server-table tbody tr.refreshing td:first-child {
-    background: hsl(var(--b1));
+.qp-server-table > tbody > tr.refreshing > td:first-child {
+    background-color: hsl(var(--b1)) !important;
 }
 
 /* --- Drag-to-reorder column indicators --- */
