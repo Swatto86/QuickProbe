@@ -5894,15 +5894,18 @@
             });
             table.appendChild(colgroup);
 
-            // Header with sort + resize handles + drag-to-reorder.
+            // Header with sort + resize handles + manual drag-to-reorder.
+            // Manual reorder (mousedown/mousemove/mouseup) is used instead of
+            // HTML5 drag because the browser's native drag tries to drag the
+            // header's text as a text/plain payload, which shows the "not
+            // allowed" cursor everywhere except actual text drop targets.
             const thead = document.createElement('thead');
             const headerRow = document.createElement('tr');
             columns.forEach(col => {
                 const th = document.createElement('th');
                 th.dataset.key = col.key;
                 th.className = `qp-th-${col.key}`;
-                th.draggable = true;
-                th.title = 'Drag to reorder column';
+                th.title = 'Drag to reorder · click to sort';
                 if (col.align === 'right') th.style.textAlign = 'right';
                 if (col.align === 'center') th.style.textAlign = 'center';
 
@@ -5911,10 +5914,6 @@
                 labelBtn.textContent = col.label;
                 labelBtn.setAttribute('role', 'button');
                 labelBtn.setAttribute('tabindex', '0');
-                // `draggable="false"` on the child lets the dragstart event
-                // bubble up to the parent <th draggable="true"> so reordering
-                // works when the user grabs the label itself.
-                labelBtn.draggable = false;
                 if (col.nosort) {
                     labelBtn.setAttribute('aria-disabled', 'true');
                     labelBtn.classList.add('nosort');
@@ -5923,7 +5922,15 @@
                     labelBtn.textContent = `${col.label} ${tableSortState.asc ? '▲' : '▼'}`;
                 }
                 if (!col.nosort) {
-                    labelBtn.addEventListener('click', () => {
+                    // Click to sort. The mousedown handler on the <th> will
+                    // suppress this click if the user actually dragged.
+                    labelBtn.addEventListener('click', (ev) => {
+                        if (th.dataset.dragHappened === '1') {
+                            delete th.dataset.dragHappened;
+                            ev.preventDefault();
+                            ev.stopPropagation();
+                            return;
+                        }
                         if (tableSortState.key === col.key) {
                             tableSortState.asc = !tableSortState.asc;
                         } else {
@@ -5941,58 +5948,20 @@
                 }
                 th.appendChild(labelBtn);
 
-                // Resize handle (don't start a reorder drag from the handle)
+                // Resize handle on the right edge.
                 const handle = document.createElement('span');
                 handle.className = 'qp-col-resize';
-                handle.draggable = false;
-                handle.addEventListener('mousedown', (e) => startColResize(e, col.key, colgroup));
-                handle.addEventListener('dragstart', (e) => { e.preventDefault(); e.stopPropagation(); });
+                handle.addEventListener('mousedown', (e) => {
+                    e.stopPropagation(); // don't start a reorder
+                    startColResize(e, col.key, colgroup);
+                });
                 th.appendChild(handle);
 
-                // --- Drag-and-drop column reordering ---
-                th.addEventListener('dragstart', (ev) => {
-                    // Suppress reorder drag while a resize is in progress or when
-                    // starting from the resize handle / sort button.
-                    if (document.body.classList.contains('qp-col-resizing')) { ev.preventDefault(); return; }
-                    if (ev.target && ev.target.closest && ev.target.closest('.qp-col-resize')) { ev.preventDefault(); return; }
-                    ev.dataTransfer.effectAllowed = 'move';
-                    try { ev.dataTransfer.setData('text/plain', col.key); } catch (e) { /* ignore */ }
-                    th.classList.add('qp-col-dragging');
-                });
-                th.addEventListener('dragend', () => {
-                    th.classList.remove('qp-col-dragging');
-                    headerRow.querySelectorAll('.qp-col-drop-before, .qp-col-drop-after')
-                        .forEach(el => el.classList.remove('qp-col-drop-before', 'qp-col-drop-after'));
-                });
-                th.addEventListener('dragover', (ev) => {
-                    ev.preventDefault();
-                    ev.dataTransfer.dropEffect = 'move';
-                    const rect = th.getBoundingClientRect();
-                    const before = (ev.clientX - rect.left) < (rect.width / 2);
-                    th.classList.toggle('qp-col-drop-before', before);
-                    th.classList.toggle('qp-col-drop-after', !before);
-                });
-                th.addEventListener('dragleave', () => {
-                    th.classList.remove('qp-col-drop-before', 'qp-col-drop-after');
-                });
-                th.addEventListener('drop', (ev) => {
-                    ev.preventDefault();
-                    let srcKey = '';
-                    try { srcKey = ev.dataTransfer.getData('text/plain') || ''; } catch (e) { /* ignore */ }
-                    th.classList.remove('qp-col-drop-before', 'qp-col-drop-after');
-                    if (!srcKey || srcKey === col.key) return;
-                    const rect = th.getBoundingClientRect();
-                    const insertBefore = (ev.clientX - rect.left) < (rect.width / 2);
-                    const currentOrder = loadTableColOrder();
-                    const from = currentOrder.indexOf(srcKey);
-                    if (from === -1) return;
-                    currentOrder.splice(from, 1);
-                    let to = currentOrder.indexOf(col.key);
-                    if (to === -1) return;
-                    if (!insertBefore) to += 1;
-                    currentOrder.splice(to, 0, srcKey);
-                    saveTableColOrder(currentOrder);
-                    displayAllServers();
+                // Manual mouse-driven reorder.
+                th.addEventListener('mousedown', (e) => {
+                    if (e.button !== 0) return;
+                    if (e.target && e.target.closest && e.target.closest('.qp-col-resize')) return;
+                    startColReorder(e, col.key, headerRow, th);
                 });
 
                 headerRow.appendChild(th);
@@ -6141,6 +6110,80 @@
                 });
                 saveTableColWidths(widths);
             };
+            document.addEventListener('mousemove', onMove);
+            document.addEventListener('mouseup', onUp);
+        }
+
+        // Manual mouse-driven column reorder. Entered on mousedown; becomes
+        // a drag once the pointer moves more than DRAG_THRESHOLD px. While
+        // dragging we highlight the target <th> with drop-before/after and
+        // on mouseup we rewrite qp_table_col_order and re-render.
+        // A short click (no drag) falls through and fires the label's sort
+        // handler normally.
+        function startColReorder(e, colKey, headerRow, sourceTh) {
+            const DRAG_THRESHOLD = 5;
+            const startX = e.clientX;
+            let dragging = false;
+            let currentTarget = null;
+
+            const clearIndicators = () => {
+                headerRow.querySelectorAll('.qp-col-drop-before, .qp-col-drop-after')
+                    .forEach(el => el.classList.remove('qp-col-drop-before', 'qp-col-drop-after'));
+            };
+
+            const onMove = (ev) => {
+                if (!dragging) {
+                    if (Math.abs(ev.clientX - startX) < DRAG_THRESHOLD) return;
+                    dragging = true;
+                    document.body.classList.add('qp-col-reordering');
+                    sourceTh.classList.add('qp-col-dragging');
+                }
+                // Temporarily disable pointer-events on the dragging header
+                // so elementFromPoint returns the <th> underneath.
+                const prev = sourceTh.style.pointerEvents;
+                sourceTh.style.pointerEvents = 'none';
+                const el = document.elementFromPoint(ev.clientX, ev.clientY);
+                sourceTh.style.pointerEvents = prev;
+
+                const th = el && el.closest ? el.closest('th[data-key]') : null;
+                clearIndicators();
+                if (th && th !== sourceTh && th.parentElement === headerRow) {
+                    const rect = th.getBoundingClientRect();
+                    const before = (ev.clientX - rect.left) < (rect.width / 2);
+                    th.classList.toggle('qp-col-drop-before', before);
+                    th.classList.toggle('qp-col-drop-after', !before);
+                    currentTarget = { th, before };
+                } else {
+                    currentTarget = null;
+                }
+            };
+
+            const onUp = () => {
+                document.removeEventListener('mousemove', onMove);
+                document.removeEventListener('mouseup', onUp);
+                document.body.classList.remove('qp-col-reordering');
+                sourceTh.classList.remove('qp-col-dragging');
+                clearIndicators();
+
+                if (!dragging) return; // treat as a click — sort handler runs
+
+                // Tell the label's click handler to ignore the click that
+                // will fire immediately after this mouseup.
+                sourceTh.dataset.dragHappened = '1';
+
+                if (!currentTarget) return;
+                const order = loadTableColOrder();
+                const from = order.indexOf(colKey);
+                if (from === -1) return;
+                order.splice(from, 1);
+                let to = order.indexOf(currentTarget.th.dataset.key);
+                if (to === -1) return;
+                if (!currentTarget.before) to += 1;
+                order.splice(to, 0, colKey);
+                saveTableColOrder(order);
+                displayAllServers();
+            };
+
             document.addEventListener('mousemove', onMove);
             document.addEventListener('mouseup', onUp);
         }

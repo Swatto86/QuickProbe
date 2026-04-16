@@ -540,14 +540,18 @@
 }
 
 .qp-server-table thead {
-    position: sticky;
-    top: 0;
-    z-index: 10;
     background: hsl(var(--b2));
 }
 
 .qp-server-table thead th {
-    position: relative;
+    /* Sticky is applied per-<th>, not to <thead>, because Chromium applies
+       `position: sticky` inconsistently on <thead> itself (especially with
+       table-layout: fixed). Per-cell sticky works reliably. */
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    position: -webkit-sticky; /* older WebKit */
+    /* Non-sticky bits */
     padding: 0.5rem 0.6rem;
     font-size: 0.78rem;
     font-weight: 700;
@@ -572,9 +576,6 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     vertical-align: middle;
-    /* The span sits inside a draggable <th>; we still want the user to be
-       able to grab it to reorder the column. */
-    -webkit-user-drag: element;
     user-select: none;
 }
 
@@ -693,12 +694,22 @@ body.qp-col-resizing {
 }
 
 /* --- Drag-to-reorder column indicators --- */
-.qp-server-table thead th[draggable="true"] {
+.qp-server-table thead th {
     cursor: grab;
+}
+.qp-server-table thead th .qp-th-label {
+    cursor: pointer; /* sorting */
+}
+.qp-server-table thead th .qp-th-label.nosort {
+    cursor: grab; /* non-sortable column label still supports drag */
 }
 .qp-server-table thead th.qp-col-dragging {
     opacity: 0.5;
-    cursor: grabbing;
+}
+body.qp-col-reordering,
+body.qp-col-reordering * {
+    cursor: grabbing !important;
+    user-select: none !important;
 }
 .qp-server-table thead th.qp-col-drop-before {
     box-shadow: inset 3px 0 0 hsl(var(--p));
