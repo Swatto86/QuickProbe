@@ -3725,6 +3725,10 @@
         function setHostViewMode(mode) {
             if (mode !== 'cards' && mode !== 'groups' && mode !== 'table') return;
             if (hostViewMode === mode) return;
+            // Any open table-view floating actions menu must close before the
+            // view swaps out — its document-level listeners would otherwise
+            // linger against a detached DOM.
+            if (typeof closeTableActionsMenu === 'function') closeTableActionsMenu();
             hostViewMode = mode;
             if (hostViewMode !== 'groups') {
                 focusedGroup = null;
@@ -4138,6 +4142,10 @@
             }
 
             clearSelection();
+            // Close any open table-view floating actions menu before we
+            // re-render, or its anchor row will be replaced underneath it
+            // and its document-level listeners would leak.
+            if (typeof closeTableActionsMenu === 'function') closeTableActionsMenu();
 
             // Always calculate summary from ALL servers so users see total infrastructure health
             const summary = Utils.summarize(serversData);
