@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Table view: **drag-to-reorder columns** (drop indicators highlight the target position; order persisted to `qp_table_col_order`)
+- Table view: **Actions column moved to position 0** by default
+- Table view: **sticky-left first column** — the leftmost column (Actions by default) stays visible while scrolling horizontally
 - `scripts/verify.ps1` — single source of truth for repo health verification
 - `.github/workflows/ci.yml` — Windows CI quality gate using verify.ps1
 - `.github/copilot-instructions.md` — agent collaboration policy
