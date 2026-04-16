@@ -1,6 +1,6 @@
 [package]
 name = "quickprobe"
-version = "2.1.0"
+version = "2.1.1"
 edition = "2021"
 authors = ["Swatto"]
 description = "Windows server interrogation tool using WinRM/CIM"
