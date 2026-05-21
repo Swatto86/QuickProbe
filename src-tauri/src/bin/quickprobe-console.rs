@@ -116,18 +116,19 @@ impl ConsoleApp {
             return;
         };
 
-        let Some(row) = self
+        let Some((server_name, os_type)) = self
             .hosts
             .iter()
             .find(|candidate| candidate.server_name == host)
+            .map(|row| (row.server_name.clone(), row.os_type.clone()))
         else {
             return;
         };
 
-        if row.os_type.eq_ignore_ascii_case("linux") {
-            self.launch_process("ssh", &[&row.server_name]);
+        if os_type.eq_ignore_ascii_case("linux") {
+            self.launch_process("ssh", &[server_name.as_str()]);
         } else {
-            let target = format!("/v:{}", row.server_name);
+            let target = format!("/v:{server_name}");
             self.launch_process("mstsc", &[target.as_str()]);
         }
     }
