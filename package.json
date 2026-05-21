@@ -6,6 +6,7 @@
     "tauri": "tauri",
     "dev": "npm run build:css && tauri dev",
     "build": "npm run build:css && tauri build",
+    "console": "cd src-tauri && cargo run --bin quickprobe-console",
     "build:css": "npx tailwindcss -i ./ui/input.css -o ./ui/styles.css --minify",
     "watch:css": "npx tailwindcss -i ./ui/input.css -o ./ui/styles.css --watch",
     "test": "node ui/tests/all-tests.js",
