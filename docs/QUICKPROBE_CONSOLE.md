@@ -1,52 +1,99 @@
 # QuickProbe Console
 
-QuickProbe Console is a fast, business-focused desktop view over the existing QuickProbe host inventory.
+QuickProbe Console is a standalone Rust/egui desktop app for a fast, business-focused host operations table.
 
-It intentionally avoids dashboard summary cards and presents hosts in a single filterable, sortable table.
+It deliberately avoids dashboard cards and presents the estate as a single filterable, sortable table.
 
-## Current scope
+## Separation from Tauri
 
-This first pass is a standalone Rust/egui binary that reuses the existing QuickProbe SQLite database at:
+QuickProbe Console now lives in its own crate:
+
+```text
+quickprobe-console/
+```
+
+It does not depend on the Tauri app crate. It only shares the existing local QuickProbe SQLite database:
 
 ```text
 %APPDATA%\QuickProbe\quickprobe.db
 ```
 
-It currently supports:
+The existing Tauri app remains under:
 
-- loading hosts from the existing `hosts` table
-- joining latest probe data from `host_health`
-- filtering by host, group, OS, status, or notes
-- sorting table columns
-- selecting a host
-- double-click connect behaviour:
+```text
+src-tauri/
+ui/
+```
+
+## Current capabilities
+
+- Loads hosts from the existing `hosts` table.
+- Joins latest cached probe data from `host_health`.
+- Global filtering across all visible columns.
+- Optional per-column filters for every table column.
+- Sortable columns.
+- Resizable table columns.
+- Light/dark mode toggle.
+- Add, edit, and delete hosts.
+- Double-click/connect behaviour:
   - Windows hosts launch `mstsc /v:<host>`
   - Linux hosts launch `ssh <host>`
+- Optional embedded Meslo Nerd Font support.
 
 ## Run locally
 
 From the repository root:
 
 ```powershell
-cd src-tauri
-cargo run --bin quickprobe-console
+npm run console
 ```
+
+Or directly:
+
+```powershell
+cd quickprobe-console
+cargo run
+```
+
+Check the standalone crate:
+
+```powershell
+npm run console:check
+```
+
+## Optional Meslo Nerd Font
+
+QuickProbe Console can embed Meslo Nerd Font for the whole egui UI.
+
+Place the regular TTF here:
+
+```text
+quickprobe-console/assets/fonts/MesloLGS NF Regular.ttf
+```
+
+Then rerun:
+
+```powershell
+npm run console
+```
+
+If the file is not present, the console falls back to egui defaults.
 
 ## Design rules
 
 - Table-first interface.
-- No summary cards.
-- Keep the existing Tauri UI untouched until Console reaches feature parity.
-- Keep probing, credentials, database, and host actions outside the UI layer.
-- The UI should display state and dispatch commands; it should not own business logic.
+- No dashboard summary cards.
+- Keep UI, database access, and remote operations separated as the app grows.
+- Do not make the Tauri app a dependency of Console.
+- Use the existing database schema for compatibility until a deliberate migration is needed.
 
 ## Next work
 
 Planned follow-up work:
 
-1. Add a proper action column/context menu.
-2. Reuse existing QuickProbe refresh/probe commands rather than only reading cached health data.
-3. Add host editor integration.
-4. Add credentials flow.
-5. Add AD scan entry point.
-6. Add packaging/release workflow once the binary is stable.
+1. Add a right-click/context action menu per row.
+2. Reuse or port live refresh/probe commands.
+3. Add credential management.
+4. Add AD scan/import entry point.
+5. Add packaging/release workflow for the standalone executable.
+6. Split the standalone source into modules once the UI surface stabilises.
