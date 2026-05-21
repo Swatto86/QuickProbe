@@ -6,11 +6,13 @@ It deliberately avoids dashboard cards and presents the estate as a single filte
 
 ## Separation from Tauri
 
-QuickProbe Console now lives in its own crate:
+QuickProbe Console now lives in its own Rust crate:
 
 ```text
 quickprobe-console/
 ```
+
+A Rust crate is a separately buildable Rust package with its own `Cargo.toml`. In this repository, that means Console builds independently from the Tauri app, but still lives in the same Git repository.
 
 It does not depend on the Tauri app crate. It only shares the existing local QuickProbe SQLite database:
 
@@ -24,6 +26,26 @@ The existing Tauri app remains under:
 src-tauri/
 ui/
 ```
+
+## Splitting to a separate repository
+
+Console can be split into its own repository later because it is now self-contained under `quickprobe-console/`.
+
+Recommended path:
+
+```powershell
+git subtree split --prefix=quickprobe-console -b quickprobe-console-split
+gh repo create QuickProbeConsole --public --source=quickprobe-console --remote=console --push
+```
+
+If you want to preserve the full folder history more carefully, use `git filter-repo` instead of copying files manually.
+
+Before splitting fully, decide whether Console should:
+
+- keep sharing `%APPDATA%\QuickProbe\quickprobe.db` for compatibility, or
+- use its own database path such as `%APPDATA%\QuickProbeConsole\quickprobe-console.db`.
+
+The current implementation deliberately keeps the shared QuickProbe database so both versions can see the same host inventory.
 
 ## Current capabilities
 
