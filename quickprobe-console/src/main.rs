@@ -1,6 +1,6 @@
 use eframe::egui;
 use egui_extras::{Column, TableBuilder};
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection};
 use serde_json::Value;
 use std::cmp::Ordering;
 use std::fs;
@@ -412,9 +412,19 @@ impl ConsoleApp {
     }
 
     fn show_status_bar(&self, ui: &mut egui::Ui, visible_count: usize) {
+        let running = self
+            .hosts
+            .iter()
+            .filter(|host| host.status.eq_ignore_ascii_case("running"))
+            .count();
+        let failed = self.hosts.len().saturating_sub(running);
+
         ui.horizontal(|ui| {
             ui.strong(format!("{visible_count} shown"));
             ui.label(format!("{} total", self.hosts.len()));
+            ui.separator();
+            ui.label(format!("{running} running"));
+            ui.label(format!("{failed} other"));
             if let Some(selected) = &self.selected_host {
                 ui.separator();
                 ui.label(format!("Selected: {selected}"));
@@ -424,6 +434,12 @@ impl ConsoleApp {
 
     fn show_table(&mut self, ui: &mut egui::Ui, rows: &[HostRow]) {
         let header_height = if self.show_column_filters { 52.0 } else { 26.0 };
+        let show_filters = self.show_column_filters;
+        let sort_column = self.sort_column;
+        let sort_direction = self.sort_direction;
+        let mut sort_request = None;
+        let mut selected_request = None;
+        let mut connect_request = None;
 
         TableBuilder::new(ui)
             .striped(true)
@@ -442,42 +458,147 @@ impl ConsoleApp {
             .column(Column::auto().at_least(150.0))
             .header(header_height, |mut header| {
                 header.col(|ui| {
-                    self.column_header(ui, "Status", SortColumn::Status, &mut self.column_filters.status)
+                    if column_header(
+                        ui,
+                        "Status",
+                        SortColumn::Status,
+                        show_filters,
+                        sort_column,
+                        sort_direction,
+                        &mut self.column_filters.status,
+                    ) {
+                        sort_request = Some(SortColumn::Status);
+                    }
                 });
                 header.col(|ui| {
-                    self.column_header(ui, "Host", SortColumn::Host, &mut self.column_filters.host)
+                    if column_header(
+                        ui,
+                        "Host",
+                        SortColumn::Host,
+                        show_filters,
+                        sort_column,
+                        sort_direction,
+                        &mut self.column_filters.host,
+                    ) {
+                        sort_request = Some(SortColumn::Host);
+                    }
                 });
                 header.col(|ui| {
-                    self.column_header(ui, "OS", SortColumn::Os, &mut self.column_filters.os)
+                    if column_header(
+                        ui,
+                        "OS",
+                        SortColumn::Os,
+                        show_filters,
+                        sort_column,
+                        sort_direction,
+                        &mut self.column_filters.os,
+                    ) {
+                        sort_request = Some(SortColumn::Os);
+                    }
                 });
                 header.col(|ui| {
-                    self.column_header(ui, "Group", SortColumn::Group, &mut self.column_filters.group)
+                    if column_header(
+                        ui,
+                        "Group",
+                        SortColumn::Group,
+                        show_filters,
+                        sort_column,
+                        sort_direction,
+                        &mut self.column_filters.group,
+                    ) {
+                        sort_request = Some(SortColumn::Group);
+                    }
                 });
                 header.col(|ui| {
-                    self.column_header(ui, "CPU", SortColumn::Cpu, &mut self.column_filters.cpu)
+                    if column_header(
+                        ui,
+                        "CPU",
+                        SortColumn::Cpu,
+                        show_filters,
+                        sort_column,
+                        sort_direction,
+                        &mut self.column_filters.cpu,
+                    ) {
+                        sort_request = Some(SortColumn::Cpu);
+                    }
                 });
                 header.col(|ui| {
-                    self.column_header(ui, "Memory", SortColumn::Memory, &mut self.column_filters.memory)
+                    if column_header(
+                        ui,
+                        "Memory",
+                        SortColumn::Memory,
+                        show_filters,
+                        sort_column,
+                        sort_direction,
+                        &mut self.column_filters.memory,
+                    ) {
+                        sort_request = Some(SortColumn::Memory);
+                    }
                 });
                 header.col(|ui| {
-                    self.column_header(ui, "Disk", SortColumn::Disk, &mut self.column_filters.disk)
+                    if column_header(
+                        ui,
+                        "Disk",
+                        SortColumn::Disk,
+                        show_filters,
+                        sort_column,
+                        sort_direction,
+                        &mut self.column_filters.disk,
+                    ) {
+                        sort_request = Some(SortColumn::Disk);
+                    }
                 });
                 header.col(|ui| {
-                    self.column_header(ui, "Uptime", SortColumn::Uptime, &mut self.column_filters.uptime)
+                    if column_header(
+                        ui,
+                        "Uptime",
+                        SortColumn::Uptime,
+                        show_filters,
+                        sort_column,
+                        sort_direction,
+                        &mut self.column_filters.uptime,
+                    ) {
+                        sort_request = Some(SortColumn::Uptime);
+                    }
                 });
                 header.col(|ui| {
-                    self.column_header(ui, "Services", SortColumn::Services, &mut self.column_filters.services)
+                    if column_header(
+                        ui,
+                        "Services",
+                        SortColumn::Services,
+                        show_filters,
+                        sort_column,
+                        sort_direction,
+                        &mut self.column_filters.services,
+                    ) {
+                        sort_request = Some(SortColumn::Services);
+                    }
                 });
                 header.col(|ui| {
-                    self.column_header(ui, "Notes", SortColumn::Notes, &mut self.column_filters.notes)
+                    if column_header(
+                        ui,
+                        "Notes",
+                        SortColumn::Notes,
+                        show_filters,
+                        sort_column,
+                        sort_direction,
+                        &mut self.column_filters.notes,
+                    ) {
+                        sort_request = Some(SortColumn::Notes);
+                    }
                 });
                 header.col(|ui| {
-                    self.column_header(
+                    if column_header(
                         ui,
                         "Last checked",
                         SortColumn::LastChecked,
+                        show_filters,
+                        sort_column,
+                        sort_direction,
                         &mut self.column_filters.last_checked,
-                    )
+                    ) {
+                        sort_request = Some(SortColumn::LastChecked);
+                    }
                 });
             })
             .body(|body| {
@@ -485,66 +606,28 @@ impl ConsoleApp {
                     let host = &rows[row.index()];
                     let selected = self.selected_host.as_deref() == Some(host.server_name.as_str());
 
-                    row.col(|ui| self.row_label(ui, selected, &host.status, host));
-                    row.col(|ui| self.row_label(ui, selected, &host.server_name, host));
-                    row.col(|ui| self.row_label(ui, selected, &host.os_type, host));
-                    row.col(|ui| self.row_label(ui, selected, empty_dash(&host.group_name), host));
-                    row.col(|ui| self.row_label(ui, selected, &format_percent(host.cpu), host));
-                    row.col(|ui| self.row_label(ui, selected, &format_percent(host.memory), host));
-                    row.col(|ui| self.row_label(ui, selected, &format_percent(host.disk), host));
-                    row.col(|ui| {
-                        self.row_label(ui, selected, host.uptime.as_deref().unwrap_or("-"), host)
-                    });
-                    row.col(|ui| self.row_label(ui, selected, empty_dash(&host.services), host));
-                    row.col(|ui| self.row_label(ui, selected, empty_dash(&host.notes), host));
-                    row.col(|ui| {
-                        self.row_label(
-                            ui,
-                            selected,
-                            host.last_checked.as_deref().unwrap_or("-"),
-                            host,
-                        )
-                    });
+                    row.col(|ui| row_label(ui, selected, &host.status, host, &mut selected_request, &mut connect_request));
+                    row.col(|ui| row_label(ui, selected, &host.server_name, host, &mut selected_request, &mut connect_request));
+                    row.col(|ui| row_label(ui, selected, &host.os_type, host, &mut selected_request, &mut connect_request));
+                    row.col(|ui| row_label(ui, selected, empty_dash(&host.group_name), host, &mut selected_request, &mut connect_request));
+                    row.col(|ui| row_label(ui, selected, &format_percent(host.cpu), host, &mut selected_request, &mut connect_request));
+                    row.col(|ui| row_label(ui, selected, &format_percent(host.memory), host, &mut selected_request, &mut connect_request));
+                    row.col(|ui| row_label(ui, selected, &format_percent(host.disk), host, &mut selected_request, &mut connect_request));
+                    row.col(|ui| row_label(ui, selected, host.uptime.as_deref().unwrap_or("-"), host, &mut selected_request, &mut connect_request));
+                    row.col(|ui| row_label(ui, selected, empty_dash(&host.services), host, &mut selected_request, &mut connect_request));
+                    row.col(|ui| row_label(ui, selected, empty_dash(&host.notes), host, &mut selected_request, &mut connect_request));
+                    row.col(|ui| row_label(ui, selected, host.last_checked.as_deref().unwrap_or("-"), host, &mut selected_request, &mut connect_request));
                 });
             });
-    }
 
-    fn column_header(
-        &mut self,
-        ui: &mut egui::Ui,
-        label: &str,
-        column: SortColumn,
-        filter: &mut String,
-    ) {
-        let sort_marker = if self.sort_column == column {
-            match self.sort_direction {
-                SortDirection::Asc => " +",
-                SortDirection::Desc => " -",
-            }
-        } else {
-            ""
-        };
-
-        if ui.button(format!("{label}{sort_marker}")).clicked() {
+        if let Some(column) = sort_request {
             self.set_sort(column);
         }
-
-        if self.show_column_filters {
-            ui.add(
-                egui::TextEdit::singleline(filter)
-                    .hint_text("filter")
-                    .desired_width(f32::INFINITY),
-            );
+        if let Some(server_name) = selected_request {
+            self.selected_host = Some(server_name);
         }
-    }
-
-    fn row_label(&mut self, ui: &mut egui::Ui, selected: bool, text: &str, host: &HostRow) {
-        let response = ui.selectable_label(selected, text).on_hover_text(text);
-        if response.clicked() {
-            self.selected_host = Some(host.server_name.clone());
-        }
-        if response.double_clicked() {
-            self.selected_host = Some(host.server_name.clone());
+        if let Some(server_name) = connect_request {
+            self.selected_host = Some(server_name);
             self.launch_selected();
         }
     }
@@ -681,6 +764,54 @@ fn configure_fonts(ctx: &egui::Context) {
     ctx.set_fonts(fonts);
 }
 
+fn column_header(
+    ui: &mut egui::Ui,
+    label: &str,
+    column: SortColumn,
+    show_filter: bool,
+    sort_column: SortColumn,
+    sort_direction: SortDirection,
+    filter: &mut String,
+) -> bool {
+    let sort_marker = if sort_column == column {
+        match sort_direction {
+            SortDirection::Asc => " +",
+            SortDirection::Desc => " -",
+        }
+    } else {
+        ""
+    };
+
+    let clicked = ui.button(format!("{label}{sort_marker}")).clicked();
+
+    if show_filter {
+        ui.add(
+            egui::TextEdit::singleline(filter)
+                .hint_text("filter")
+                .desired_width(f32::INFINITY),
+        );
+    }
+
+    clicked
+}
+
+fn row_label(
+    ui: &mut egui::Ui,
+    selected: bool,
+    text: &str,
+    host: &HostRow,
+    selected_request: &mut Option<String>,
+    connect_request: &mut Option<String>,
+) {
+    let response = ui.selectable_label(selected, text).on_hover_text(text);
+    if response.clicked() {
+        *selected_request = Some(host.server_name.clone());
+    }
+    if response.double_clicked() {
+        *connect_request = Some(host.server_name.clone());
+    }
+}
+
 fn column_matches(value: &str, filter: &str) -> bool {
     let filter = filter.trim().to_lowercase();
     filter.is_empty() || value.to_lowercase().contains(&filter)
@@ -730,7 +861,8 @@ fn cmp_opt_f64(left: Option<f64>, right: Option<f64>) -> Ordering {
 }
 
 fn get_appdata_dir() -> Result<PathBuf, String> {
-    let app_data = std::env::var("APPDATA").map_err(|_| "APPDATA environment variable not found".to_string())?;
+    let app_data = std::env::var("APPDATA")
+        .map_err(|_| "APPDATA environment variable not found".to_string())?;
     let target = PathBuf::from(app_data).join(APP_NAME);
     fs::create_dir_all(&target).map_err(|err| err.to_string())?;
     Ok(target)
