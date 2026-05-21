@@ -24,11 +24,17 @@ QuickProbe lets you check server health, launch RDP sessions, and manage your fl
 - **Local mode** — Operate without domain credentials for lab/workgroup environments
 - **Encrypted backups** — AES-256 encrypted ZIP export/import
 
+## QuickProbe Console
+
+QuickProbe Console is an experimental egui-based desktop UI for a faster, business-style host table experience. It reuses the existing local QuickProbe database and keeps the current Tauri dashboard untouched while the console matures.
+
+See [docs/QUICKPROBE_CONSOLE.md](docs/QUICKPROBE_CONSOLE.md) for scope, run instructions, and next work.
+
 ## Quick Start
 
 1. **Download** the installer from [Releases](https://github.com/Swatto86/QuickProbe/releases)
 2. **Install** — no admin rights needed
-3. **Login** — enter your domain credentials (`DOMAIN\username`)
+3. **Login** — enter your domain credentials (`DOMAIN\\username`)
 4. **Add servers** — manually or scan your Active Directory
 5. **Monitor** — click Refresh and double-click any card to RDP
 
@@ -147,8 +153,6 @@ src-tauri/              # Rust backend (Tauri 2.x)
 │   │   ├── ssh.rs      # Linux Remote Session
 │   │   └── credman.rs  # Credential Manager
 │   └── db.rs           # SQLite database
-├── Cargo.toml          # Rust dependencies
-└── tauri.conf.json     # Tauri configuration
 
 ui/                     # Frontend
 ├── dashboard-all.html  # Main dashboard
@@ -180,4 +184,3 @@ MIT — see [LICENSE](LICENSE) for details.
 ---
 
 Made by [Swatto](https://github.com/Swatto86)
-
