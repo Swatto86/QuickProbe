@@ -116,7 +116,11 @@ impl ConsoleApp {
             return;
         };
 
-        let Some(row) = self.hosts.iter().find(|candidate| candidate.server_name == host) else {
+        let Some(row) = self
+            .hosts
+            .iter()
+            .find(|candidate| candidate.server_name == host)
+        else {
             return;
         };
 
@@ -206,7 +210,8 @@ impl eframe::App for ConsoleApp {
                 .body(|body| {
                     body.rows(24.0, rows.len(), |mut row| {
                         let host = &rows[row.index()];
-                        let selected = self.selected_host.as_deref() == Some(host.server_name.as_str());
+                        let selected =
+                            self.selected_host.as_deref() == Some(host.server_name.as_str());
 
                         row.col(|ui| row_label(ui, selected, &host.status, || {}));
                         row.col(|ui| {
@@ -221,11 +226,26 @@ impl eframe::App for ConsoleApp {
                         });
                         row.col(|ui| row_label(ui, selected, &host.os_type, || {}));
                         row.col(|ui| row_label(ui, selected, empty_dash(&host.group_name), || {}));
-                        row.col(|ui| row_label(ui, selected, format_percent(host.cpu).as_str(), || {}));
-                        row.col(|ui| row_label(ui, selected, format_percent(host.memory).as_str(), || {}));
-                        row.col(|ui| row_label(ui, selected, format_percent(host.disk).as_str(), || {}));
-                        row.col(|ui| row_label(ui, selected, host.uptime.as_deref().unwrap_or("—"), || {}));
-                        row.col(|ui| row_label(ui, selected, host.last_checked.as_deref().unwrap_or("—"), || {}));
+                        row.col(|ui| {
+                            row_label(ui, selected, format_percent(host.cpu).as_str(), || {})
+                        });
+                        row.col(|ui| {
+                            row_label(ui, selected, format_percent(host.memory).as_str(), || {})
+                        });
+                        row.col(|ui| {
+                            row_label(ui, selected, format_percent(host.disk).as_str(), || {})
+                        });
+                        row.col(|ui| {
+                            row_label(ui, selected, host.uptime.as_deref().unwrap_or("—"), || {})
+                        });
+                        row.col(|ui| {
+                            row_label(
+                                ui,
+                                selected,
+                                host.last_checked.as_deref().unwrap_or("—"),
+                                || {},
+                            )
+                        });
                     });
                 });
         });
@@ -327,10 +347,24 @@ fn query_hosts(conn: &Connection) -> rusqlite::Result<Vec<HostRow>> {
             os_type: row.get(2)?,
             notes: row.get(3)?,
             status: derive_status(snapshot.as_ref()),
-            cpu: find_number(snapshot.as_ref(), &["cpu_percent", "cpu_usage", "cpu_load", "cpu"]),
-            memory: find_number(snapshot.as_ref(), &["memory_percent", "memory_usage", "memory_used_percent", "memory"]),
+            cpu: find_number(
+                snapshot.as_ref(),
+                &["cpu_percent", "cpu_usage", "cpu_load", "cpu"],
+            ),
+            memory: find_number(
+                snapshot.as_ref(),
+                &[
+                    "memory_percent",
+                    "memory_usage",
+                    "memory_used_percent",
+                    "memory",
+                ],
+            ),
             disk: find_worst_disk(snapshot.as_ref()),
-            uptime: find_string(snapshot.as_ref(), &["uptime", "uptime_human", "uptime_text"]),
+            uptime: find_string(
+                snapshot.as_ref(),
+                &["uptime", "uptime_human", "uptime_text"],
+            ),
             last_checked: row.get(5)?,
         })
     })?;
@@ -343,7 +377,8 @@ fn derive_status(snapshot: Option<&Value>) -> String {
         return "Unknown".to_string();
     };
 
-    if let Some(status) = find_string(Some(snapshot), &["status", "probe_status", "health_status"]) {
+    if let Some(status) = find_string(Some(snapshot), &["status", "probe_status", "health_status"])
+    {
         return status;
     }
 
@@ -360,7 +395,11 @@ fn find_worst_disk(value: Option<&Value>) -> Option<f64> {
     };
 
     let mut numbers = Vec::new();
-    collect_numbers_by_key(value, &["disk_percent", "disk_usage", "used_percent", "percent_used"], &mut numbers);
+    collect_numbers_by_key(
+        value,
+        &["disk_percent", "disk_usage", "used_percent", "percent_used"],
+        &mut numbers,
+    );
     numbers.into_iter().reduce(f64::max)
 }
 
@@ -413,7 +452,9 @@ fn find_string(value: Option<&Value>, keys: &[&str]) -> Option<String> {
             }
             None
         }
-        Value::Array(items) => items.iter().find_map(|child| find_string(Some(child), keys)),
+        Value::Array(items) => items
+            .iter()
+            .find_map(|child| find_string(Some(child), keys)),
         _ => None,
     }
 }
