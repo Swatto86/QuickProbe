@@ -6,7 +6,10 @@ use serde_json::Value;
 use std::cmp::Ordering;
 use std::process::Command;
 
+include!(concat!(env!("OUT_DIR"), "/quickprobe_console_font.rs"));
+
 const APP_TITLE: &str = "QuickProbe Console";
+const CONSOLE_FONT_NAME: &str = "MesloLGS NF";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum SortColumn {
@@ -466,13 +469,13 @@ impl eframe::App for ConsoleApp {
                             row_label(ui, selected, format_percent(host.disk).as_str(), || {})
                         });
                         row.col(|ui| {
-                            row_label(ui, selected, host.uptime.as_deref().unwrap_or("—"), || {})
+                            row_label(ui, selected, host.uptime.as_deref().unwrap_or("-"), || {})
                         });
                         row.col(|ui| {
                             row_label(
                                 ui,
                                 selected,
-                                host.last_checked.as_deref().unwrap_or("—"),
+                                host.last_checked.as_deref().unwrap_or("-"),
                                 || {},
                             )
                         });
@@ -485,11 +488,33 @@ impl eframe::App for ConsoleApp {
     }
 }
 
+fn configure_fonts(ctx: &egui::Context) {
+    let Some(font_bytes) = QUICKPROBE_CONSOLE_FONT_BYTES else {
+        return;
+    };
+
+    let mut fonts = egui::FontDefinitions::default();
+    fonts.font_data.insert(
+        CONSOLE_FONT_NAME.to_string(),
+        egui::FontData::from_static(font_bytes),
+    );
+
+    for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
+        fonts
+            .families
+            .entry(family)
+            .or_default()
+            .insert(0, CONSOLE_FONT_NAME.to_string());
+    }
+
+    ctx.set_fonts(fonts);
+}
+
 fn sort_header(ui: &mut egui::Ui, label: &str, app: &mut ConsoleApp, column: SortColumn) {
     let arrow = if app.sort_column == column {
         match app.sort_direction {
-            SortDirection::Asc => " ↑",
-            SortDirection::Desc => " ↓",
+            SortDirection::Asc => " +",
+            SortDirection::Desc => " -",
         }
     } else {
         ""
@@ -509,7 +534,7 @@ fn row_label(ui: &mut egui::Ui, selected: bool, text: &str, on_click: impl FnOnc
 
 fn empty_dash(value: &str) -> &str {
     if value.trim().is_empty() {
-        "—"
+        "-"
     } else {
         value
     }
@@ -518,7 +543,7 @@ fn empty_dash(value: &str) -> &str {
 fn format_percent(value: Option<f64>) -> String {
     value
         .map(|number| format!("{number:.0}%"))
-        .unwrap_or_else(|| "—".to_string())
+        .unwrap_or_else(|| "-".to_string())
 }
 
 fn compare_hosts(left: &HostRow, right: &HostRow, column: SortColumn) -> Ordering {
@@ -813,6 +838,9 @@ fn main() -> eframe::Result<()> {
     eframe::run_native(
         APP_TITLE,
         options,
-        Box::new(|_cc| Ok(Box::<ConsoleApp>::default())),
+        Box::new(|cc| {
+            configure_fonts(&cc.egui_ctx);
+            Ok(Box::<ConsoleApp>::default())
+        }),
     )
 }
