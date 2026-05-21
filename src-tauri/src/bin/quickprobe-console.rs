@@ -1,7 +1,7 @@
 use eframe::egui;
 use egui_extras::{Column, TableBuilder};
 use quickprobe::db;
-use rusqlite::Connection;
+use rusqlite::{params, Connection};
 use serde_json::Value;
 use std::cmp::Ordering;
 use std::process::Command;
@@ -27,18 +27,63 @@ enum SortDirection {
     Desc,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ThemeMode {
+    Dark,
+    Light,
+}
+
 #[derive(Clone, Debug, Default)]
 struct HostRow {
     server_name: String,
     group_name: String,
     os_type: String,
     notes: String,
+    services: String,
     status: String,
     cpu: Option<f64>,
     memory: Option<f64>,
     disk: Option<f64>,
     uptime: Option<String>,
     last_checked: Option<String>,
+}
+
+#[derive(Clone, Debug, Default)]
+struct HostEditor {
+    original_name: Option<String>,
+    server_name: String,
+    group_name: String,
+    os_type: String,
+    notes: String,
+    services: String,
+}
+
+impl HostEditor {
+    fn new() -> Self {
+        Self {
+            os_type: "Windows".to_string(),
+            ..Default::default()
+        }
+    }
+
+    fn from_host(host: &HostRow) -> Self {
+        Self {
+            original_name: Some(host.server_name.clone()),
+            server_name: host.server_name.clone(),
+            group_name: host.group_name.clone(),
+            os_type: host.os_type.clone(),
+            notes: host.notes.clone(),
+            services: host.services.clone(),
+        }
+    }
+
+    fn title(&self) -> &'static str {
+        if self.original_name.is_some() {
+            "Edit host"
+        } else {
+            "Add host"
+        }
+    }
 }
 
 struct ConsoleApp {
@@ -48,6 +93,9 @@ struct ConsoleApp {
     sort_direction: SortDirection,
     selected_host: Option<String>,
     last_error: Option<String>,
+    theme_mode: ThemeMode,
+    host_editor: Option<HostEditor>,
+    confirm_delete_host: Option<String>,
 }
 
 impl Default for ConsoleApp {
@@ -59,6 +107,9 @@ impl Default for ConsoleApp {
             sort_direction: SortDirection::Asc,
             selected_host: None,
             last_error: None,
+            theme_mode: ThemeMode::Dark,
+            host_editor: None,
+            confirm_delete_host: None,
         };
         app.reload_hosts();
         app
@@ -88,6 +139,7 @@ impl ConsoleApp {
                     || host.os_type.to_lowercase().contains(&filter)
                     || host.status.to_lowercase().contains(&filter)
                     || host.notes.to_lowercase().contains(&filter)
+                    || host.services.to_lowercase().contains(&filter)
             })
             .cloned()
             .collect();
@@ -108,6 +160,64 @@ impl ConsoleApp {
         } else {
             self.sort_column = column;
             self.sort_direction = SortDirection::Asc;
+        }
+    }
+
+    fn toggle_theme(&mut self) {
+        self.theme_mode = match self.theme_mode {
+            ThemeMode::Dark => ThemeMode::Light,
+            ThemeMode::Light => ThemeMode::Dark,
+        };
+    }
+
+    fn apply_theme(&self, ctx: &egui::Context) {
+        match self.theme_mode {
+            ThemeMode::Dark => ctx.set_visuals(egui::Visuals::dark()),
+            ThemeMode::Light => ctx.set_visuals(egui::Visuals::light()),
+        }
+    }
+
+    fn open_add_host(&mut self) {
+        self.host_editor = Some(HostEditor::new());
+    }
+
+    fn open_edit_selected(&mut self) {
+        let Some(selected) = self.selected_host.as_deref() else {
+            return;
+        };
+
+        if let Some(host) = self.hosts.iter().find(|host| host.server_name == selected) {
+            self.host_editor = Some(HostEditor::from_host(host));
+        }
+    }
+
+    fn request_delete_selected(&mut self) {
+        if let Some(selected) = &self.selected_host {
+            self.confirm_delete_host = Some(selected.clone());
+        }
+    }
+
+    fn save_editor(&mut self, editor: HostEditor) {
+        match save_host(&editor) {
+            Ok(saved_name) => {
+                self.selected_host = Some(saved_name);
+                self.host_editor = None;
+                self.reload_hosts();
+            }
+            Err(err) => self.last_error = Some(err),
+        }
+    }
+
+    fn delete_host(&mut self, server_name: &str) {
+        match delete_host(server_name) {
+            Ok(()) => {
+                if self.selected_host.as_deref() == Some(server_name) {
+                    self.selected_host = None;
+                }
+                self.confirm_delete_host = None;
+                self.reload_hosts();
+            }
+            Err(err) => self.last_error = Some(err),
         }
     }
 
@@ -141,17 +251,106 @@ impl ConsoleApp {
             }
         }
     }
+
+    fn show_host_editor(&mut self, ctx: &egui::Context) {
+        let Some(editor) = &mut self.host_editor else {
+            return;
+        };
+
+        let mut should_save = false;
+        let mut should_cancel = false;
+
+        egui::Window::new(editor.title())
+            .collapsible(false)
+            .resizable(true)
+            .default_width(420.0)
+            .show(ctx, |ui| {
+                ui.label("Host name");
+                ui.text_edit_singleline(&mut editor.server_name);
+                ui.add_space(8.0);
+
+                ui.label("OS");
+                egui::ComboBox::from_id_salt("host_os_type")
+                    .selected_text(&editor.os_type)
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut editor.os_type, "Windows".to_string(), "Windows");
+                        ui.selectable_value(&mut editor.os_type, "Linux".to_string(), "Linux");
+                    });
+                ui.add_space(8.0);
+
+                ui.label("Group");
+                ui.text_edit_singleline(&mut editor.group_name);
+                ui.add_space(8.0);
+
+                ui.label("Services, comma-separated");
+                ui.text_edit_singleline(&mut editor.services);
+                ui.add_space(8.0);
+
+                ui.label("Notes");
+                ui.add(
+                    egui::TextEdit::multiline(&mut editor.notes)
+                        .desired_rows(4)
+                        .desired_width(f32::INFINITY),
+                );
+
+                ui.separator();
+                ui.horizontal(|ui| {
+                    if ui.button("Save").clicked() {
+                        should_save = true;
+                    }
+                    if ui.button("Cancel").clicked() {
+                        should_cancel = true;
+                    }
+                });
+            });
+
+        if should_cancel {
+            self.host_editor = None;
+        }
+
+        if should_save {
+            if let Some(editor) = self.host_editor.clone() {
+                self.save_editor(editor);
+            }
+        }
+    }
+
+    fn show_delete_confirmation(&mut self, ctx: &egui::Context) {
+        let Some(server_name) = self.confirm_delete_host.clone() else {
+            return;
+        };
+
+        egui::Window::new("Delete host")
+            .collapsible(false)
+            .resizable(false)
+            .default_width(360.0)
+            .show(ctx, |ui| {
+                ui.label(format!("Delete {server_name} from the host inventory?"));
+                ui.label("Cached health data for this host will also be removed.");
+                ui.separator();
+                ui.horizontal(|ui| {
+                    if ui.button("Delete").clicked() {
+                        self.delete_host(&server_name);
+                    }
+                    if ui.button("Cancel").clicked() {
+                        self.confirm_delete_host = None;
+                    }
+                });
+            });
+    }
 }
 
 impl eframe::App for ConsoleApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.apply_theme(ctx);
+
         egui::TopBottomPanel::top("toolbar").show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.heading(APP_TITLE);
                 ui.separator();
 
                 let search = egui::TextEdit::singleline(&mut self.filter)
-                    .hint_text("Filter hosts, groups, status, OS...")
+                    .hint_text("Filter hosts, groups, status, OS, services...")
                     .desired_width(320.0);
                 ui.add(search);
 
@@ -164,6 +363,36 @@ impl eframe::App for ConsoleApp {
                     .clicked()
                 {
                     self.launch_selected();
+                }
+
+                ui.separator();
+
+                if ui.button("Add host").clicked() {
+                    self.open_add_host();
+                }
+
+                if ui
+                    .add_enabled(self.selected_host.is_some(), egui::Button::new("Edit host"))
+                    .clicked()
+                {
+                    self.open_edit_selected();
+                }
+
+                if ui
+                    .add_enabled(self.selected_host.is_some(), egui::Button::new("Delete host"))
+                    .clicked()
+                {
+                    self.request_delete_selected();
+                }
+
+                ui.separator();
+
+                let theme_label = match self.theme_mode {
+                    ThemeMode::Dark => "Light mode",
+                    ThemeMode::Light => "Dark mode",
+                };
+                if ui.button(theme_label).clicked() {
+                    self.toggle_theme();
                 }
             });
         });
@@ -250,6 +479,9 @@ impl eframe::App for ConsoleApp {
                     });
                 });
         });
+
+        self.show_host_editor(ctx);
+        self.show_delete_confirmation(ctx);
     }
 }
 
@@ -322,6 +554,79 @@ fn load_hosts() -> Result<Vec<HostRow>, String> {
     query_hosts(&conn).map_err(|err| err.to_string())
 }
 
+fn save_host(editor: &HostEditor) -> Result<String, String> {
+    let server_name = editor.server_name.trim();
+    if server_name.is_empty() {
+        return Err("Host name is required".to_string());
+    }
+
+    let os_type = normalize_os_type(&editor.os_type);
+    let services_json = services_text_to_json(&editor.services)?;
+    let mut conn = db::open_db().map_err(|err| err.to_string())?;
+    db::init_schema(&conn).map_err(|err| err.to_string())?;
+
+    let tx = conn.transaction().map_err(|err| err.to_string())?;
+    if let Some(original_name) = editor.original_name.as_deref() {
+        tx.execute(
+            "UPDATE hosts
+             SET server_name = ?1,
+                 notes = ?2,
+                 group_name = ?3,
+                 os_type = ?4,
+                 services = ?5
+             WHERE server_name = ?6",
+            params![
+                server_name,
+                empty_to_null(&editor.notes),
+                empty_to_null(&editor.group_name),
+                os_type,
+                services_json,
+                original_name
+            ],
+        )
+        .map_err(|err| err.to_string())?;
+
+        if !server_name.eq_ignore_ascii_case(original_name) {
+            tx.execute(
+                "UPDATE host_health SET server_name = ?1 WHERE UPPER(server_name) = UPPER(?2)",
+                params![server_name, original_name],
+            )
+            .map_err(|err| err.to_string())?;
+        }
+    } else {
+        tx.execute(
+            "INSERT INTO hosts(server_name, notes, group_name, os_type, services)
+             VALUES(?1, ?2, ?3, ?4, ?5)",
+            params![
+                server_name,
+                empty_to_null(&editor.notes),
+                empty_to_null(&editor.group_name),
+                os_type,
+                services_json
+            ],
+        )
+        .map_err(|err| err.to_string())?;
+    }
+
+    tx.commit().map_err(|err| err.to_string())?;
+    Ok(server_name.to_string())
+}
+
+fn delete_host(server_name: &str) -> Result<(), String> {
+    let mut conn = db::open_db().map_err(|err| err.to_string())?;
+    db::init_schema(&conn).map_err(|err| err.to_string())?;
+
+    let tx = conn.transaction().map_err(|err| err.to_string())?;
+    tx.execute(
+        "DELETE FROM host_health WHERE UPPER(server_name) = UPPER(?1)",
+        params![server_name],
+    )
+    .map_err(|err| err.to_string())?;
+    tx.execute("DELETE FROM hosts WHERE server_name = ?1", params![server_name])
+        .map_err(|err| err.to_string())?;
+    tx.commit().map_err(|err| err.to_string())
+}
+
 fn query_hosts(conn: &Connection) -> rusqlite::Result<Vec<HostRow>> {
     let mut stmt = conn.prepare(
         "SELECT
@@ -329,6 +634,7 @@ fn query_hosts(conn: &Connection) -> rusqlite::Result<Vec<HostRow>> {
             COALESCE(h.group_name, ''),
             COALESCE(h.os_type, 'Windows'),
             COALESCE(h.notes, ''),
+            COALESCE(h.services, '[]'),
             hh.snapshot_json,
             hh.last_probed_at
          FROM hosts h
@@ -337,16 +643,18 @@ fn query_hosts(conn: &Connection) -> rusqlite::Result<Vec<HostRow>> {
     )?;
 
     let rows = stmt.query_map([], |row| {
-        let snapshot_json: Option<String> = row.get(4)?;
+        let snapshot_json: Option<String> = row.get(5)?;
         let snapshot = snapshot_json
             .as_deref()
             .and_then(|json| serde_json::from_str::<Value>(json).ok());
+        let services_json: String = row.get(4)?;
 
         Ok(HostRow {
             server_name: row.get(0)?,
             group_name: row.get(1)?,
             os_type: row.get(2)?,
             notes: row.get(3)?,
+            services: services_json_to_text(&services_json),
             status: derive_status(snapshot.as_ref()),
             cpu: find_number(
                 snapshot.as_ref(),
@@ -366,11 +674,45 @@ fn query_hosts(conn: &Connection) -> rusqlite::Result<Vec<HostRow>> {
                 snapshot.as_ref(),
                 &["uptime", "uptime_human", "uptime_text"],
             ),
-            last_checked: row.get(5)?,
+            last_checked: row.get(6)?,
         })
     })?;
 
     rows.collect()
+}
+
+fn normalize_os_type(os_type: &str) -> &'static str {
+    if os_type.eq_ignore_ascii_case("linux") {
+        "Linux"
+    } else {
+        "Windows"
+    }
+}
+
+fn empty_to_null(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn services_text_to_json(value: &str) -> Result<String, String> {
+    let services: Vec<String> = value
+        .split(',')
+        .map(str::trim)
+        .filter(|service| !service.is_empty())
+        .map(ToString::to_string)
+        .collect();
+
+    serde_json::to_string(&services).map_err(|err| err.to_string())
+}
+
+fn services_json_to_text(value: &str) -> String {
+    serde_json::from_str::<Vec<String>>(value)
+        .map(|services| services.join(", "))
+        .unwrap_or_default()
 }
 
 fn derive_status(snapshot: Option<&Value>) -> String {
