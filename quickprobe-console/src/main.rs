@@ -58,29 +58,27 @@ struct HostRow {
 }
 
 impl HostRow {
+    fn field_text(&self, column: SortColumn) -> String {
+        match column {
+            SortColumn::Status => self.status.clone(),
+            SortColumn::Host => self.server_name.clone(),
+            SortColumn::Os => self.os_type.clone(),
+            SortColumn::Group => self.group_name.clone(),
+            SortColumn::Cpu => format_percent(self.cpu),
+            SortColumn::Memory => format_percent(self.memory),
+            SortColumn::Disk => format_percent(self.disk),
+            SortColumn::Uptime => self.uptime.clone().unwrap_or_else(|| "-".to_string()),
+            SortColumn::Services => self.services.clone(),
+            SortColumn::Notes => self.notes.clone(),
+            SortColumn::LastChecked => self.last_checked.clone().unwrap_or_else(|| "-".to_string()),
+        }
+    }
+
     fn matches_global_filter(&self, filter: &str) -> bool {
         filter.is_empty()
-            || self.server_name.to_lowercase().contains(filter)
-            || self.group_name.to_lowercase().contains(filter)
-            || self.os_type.to_lowercase().contains(filter)
-            || self.status.to_lowercase().contains(filter)
-            || self.notes.to_lowercase().contains(filter)
-            || self.services.to_lowercase().contains(filter)
-            || format_percent(self.cpu).to_lowercase().contains(filter)
-            || format_percent(self.memory).to_lowercase().contains(filter)
-            || format_percent(self.disk).to_lowercase().contains(filter)
-            || self
-                .uptime
-                .as_deref()
-                .unwrap_or("-")
-                .to_lowercase()
-                .contains(filter)
-            || self
-                .last_checked
-                .as_deref()
-                .unwrap_or("-")
-                .to_lowercase()
-                .contains(filter)
+            || ALL_COLUMNS
+                .iter()
+                .any(|column| text_matches(&self.field_text(*column), filter))
     }
 }
 
@@ -105,6 +103,10 @@ impl ColumnFilters {
     }
 
     fn has_any(&self) -> bool {
+        self.values().iter().any(|value| !value.trim().is_empty())
+    }
+
+    fn values(&self) -> [&String; 11] {
         [
             &self.status,
             &self.host,
@@ -118,25 +120,13 @@ impl ColumnFilters {
             &self.notes,
             &self.last_checked,
         ]
-        .iter()
-        .any(|value| !value.trim().is_empty())
     }
 
     fn matches(&self, host: &HostRow) -> bool {
-        column_matches(&host.status, &self.status)
-            && column_matches(&host.server_name, &self.host)
-            && column_matches(&host.os_type, &self.os)
-            && column_matches(&host.group_name, &self.group)
-            && column_matches(&format_percent(host.cpu), &self.cpu)
-            && column_matches(&format_percent(host.memory), &self.memory)
-            && column_matches(&format_percent(host.disk), &self.disk)
-            && column_matches(host.uptime.as_deref().unwrap_or("-"), &self.uptime)
-            && column_matches(&host.services, &self.services)
-            && column_matches(&host.notes, &self.notes)
-            && column_matches(
-                host.last_checked.as_deref().unwrap_or("-"),
-                &self.last_checked,
-            )
+        ALL_COLUMNS
+            .iter()
+            .zip(self.values())
+            .all(|(column, filter)| text_matches(&host.field_text(*column), filter))
     }
 }
 
@@ -191,6 +181,20 @@ struct ConsoleApp {
     host_editor: Option<HostEditor>,
     confirm_delete_host: Option<String>,
 }
+
+const ALL_COLUMNS: [SortColumn; 11] = [
+    SortColumn::Status,
+    SortColumn::Host,
+    SortColumn::Os,
+    SortColumn::Group,
+    SortColumn::Cpu,
+    SortColumn::Memory,
+    SortColumn::Disk,
+    SortColumn::Uptime,
+    SortColumn::Services,
+    SortColumn::Notes,
+    SortColumn::LastChecked,
+];
 
 impl Default for ConsoleApp {
     fn default() -> Self {
@@ -386,14 +390,11 @@ impl ConsoleApp {
                 }
 
                 ui.separator();
-
                 ui.checkbox(&mut self.show_column_filters, "Column filters");
 
+                let filters_active = !self.global_filter.is_empty() || self.column_filters.has_any();
                 if ui
-                    .add_enabled(
-                        !self.global_filter.is_empty() || self.column_filters.has_any(),
-                        egui::Button::new("Clear filters"),
-                    )
+                    .add_enabled(filters_active, egui::Button::new("Clear filters"))
                     .clicked()
                 {
                     self.global_filter.clear();
@@ -412,19 +413,19 @@ impl ConsoleApp {
     }
 
     fn show_status_bar(&self, ui: &mut egui::Ui, visible_count: usize) {
-        let running = self
+        let ok = self
             .hosts
             .iter()
-            .filter(|host| host.status.eq_ignore_ascii_case("running"))
+            .filter(|host| host.status.eq_ignore_ascii_case("ok"))
             .count();
-        let failed = self.hosts.len().saturating_sub(running);
+        let other = self.hosts.len().saturating_sub(ok);
 
         ui.horizontal(|ui| {
             ui.strong(format!("{visible_count} shown"));
             ui.label(format!("{} total", self.hosts.len()));
             ui.separator();
-            ui.label(format!("{running} running"));
-            ui.label(format!("{failed} other"));
+            ui.label(format!("{ok} OK"));
+            ui.label(format!("{other} other"));
             if let Some(selected) = &self.selected_host {
                 ui.separator();
                 ui.label(format!("Selected: {selected}"));
@@ -434,9 +435,8 @@ impl ConsoleApp {
 
     fn show_table(&mut self, ui: &mut egui::Ui, rows: &[HostRow]) {
         let header_height = if self.show_column_filters { 52.0 } else { 26.0 };
-        let show_filters = self.show_column_filters;
-        let sort_column = self.sort_column;
-        let sort_direction = self.sort_direction;
+        let filters = self.column_filters.values();
+        let mut header_filters = filters.map(String::clone);
         let mut sort_request = None;
         let mut selected_request = None;
         let mut connect_request = None;
@@ -457,168 +457,43 @@ impl ConsoleApp {
             .column(Column::auto().at_least(180.0))
             .column(Column::auto().at_least(150.0))
             .header(header_height, |mut header| {
-                header.col(|ui| {
-                    if column_header(
-                        ui,
-                        "Status",
-                        SortColumn::Status,
-                        show_filters,
-                        sort_column,
-                        sort_direction,
-                        &mut self.column_filters.status,
-                    ) {
-                        sort_request = Some(SortColumn::Status);
-                    }
-                });
-                header.col(|ui| {
-                    if column_header(
-                        ui,
-                        "Host",
-                        SortColumn::Host,
-                        show_filters,
-                        sort_column,
-                        sort_direction,
-                        &mut self.column_filters.host,
-                    ) {
-                        sort_request = Some(SortColumn::Host);
-                    }
-                });
-                header.col(|ui| {
-                    if column_header(
-                        ui,
-                        "OS",
-                        SortColumn::Os,
-                        show_filters,
-                        sort_column,
-                        sort_direction,
-                        &mut self.column_filters.os,
-                    ) {
-                        sort_request = Some(SortColumn::Os);
-                    }
-                });
-                header.col(|ui| {
-                    if column_header(
-                        ui,
-                        "Group",
-                        SortColumn::Group,
-                        show_filters,
-                        sort_column,
-                        sort_direction,
-                        &mut self.column_filters.group,
-                    ) {
-                        sort_request = Some(SortColumn::Group);
-                    }
-                });
-                header.col(|ui| {
-                    if column_header(
-                        ui,
-                        "CPU",
-                        SortColumn::Cpu,
-                        show_filters,
-                        sort_column,
-                        sort_direction,
-                        &mut self.column_filters.cpu,
-                    ) {
-                        sort_request = Some(SortColumn::Cpu);
-                    }
-                });
-                header.col(|ui| {
-                    if column_header(
-                        ui,
-                        "Memory",
-                        SortColumn::Memory,
-                        show_filters,
-                        sort_column,
-                        sort_direction,
-                        &mut self.column_filters.memory,
-                    ) {
-                        sort_request = Some(SortColumn::Memory);
-                    }
-                });
-                header.col(|ui| {
-                    if column_header(
-                        ui,
-                        "Disk",
-                        SortColumn::Disk,
-                        show_filters,
-                        sort_column,
-                        sort_direction,
-                        &mut self.column_filters.disk,
-                    ) {
-                        sort_request = Some(SortColumn::Disk);
-                    }
-                });
-                header.col(|ui| {
-                    if column_header(
-                        ui,
-                        "Uptime",
-                        SortColumn::Uptime,
-                        show_filters,
-                        sort_column,
-                        sort_direction,
-                        &mut self.column_filters.uptime,
-                    ) {
-                        sort_request = Some(SortColumn::Uptime);
-                    }
-                });
-                header.col(|ui| {
-                    if column_header(
-                        ui,
-                        "Services",
-                        SortColumn::Services,
-                        show_filters,
-                        sort_column,
-                        sort_direction,
-                        &mut self.column_filters.services,
-                    ) {
-                        sort_request = Some(SortColumn::Services);
-                    }
-                });
-                header.col(|ui| {
-                    if column_header(
-                        ui,
-                        "Notes",
-                        SortColumn::Notes,
-                        show_filters,
-                        sort_column,
-                        sort_direction,
-                        &mut self.column_filters.notes,
-                    ) {
-                        sort_request = Some(SortColumn::Notes);
-                    }
-                });
-                header.col(|ui| {
-                    if column_header(
-                        ui,
-                        "Last checked",
-                        SortColumn::LastChecked,
-                        show_filters,
-                        sort_column,
-                        sort_direction,
-                        &mut self.column_filters.last_checked,
-                    ) {
-                        sort_request = Some(SortColumn::LastChecked);
-                    }
-                });
+                for (index, column) in ALL_COLUMNS.iter().enumerate() {
+                    header.col(|ui| {
+                        if column_header(
+                            ui,
+                            column_label(*column),
+                            *column,
+                            self.show_column_filters,
+                            self.sort_column,
+                            self.sort_direction,
+                            &mut header_filters[index],
+                        ) {
+                            sort_request = Some(*column);
+                        }
+                    });
+                }
             })
             .body(|body| {
                 body.rows(25.0, rows.len(), |mut row| {
                     let host = &rows[row.index()];
                     let selected = self.selected_host.as_deref() == Some(host.server_name.as_str());
 
-                    row.col(|ui| row_label(ui, selected, &host.status, host, &mut selected_request, &mut connect_request));
-                    row.col(|ui| row_label(ui, selected, &host.server_name, host, &mut selected_request, &mut connect_request));
-                    row.col(|ui| row_label(ui, selected, &host.os_type, host, &mut selected_request, &mut connect_request));
-                    row.col(|ui| row_label(ui, selected, empty_dash(&host.group_name), host, &mut selected_request, &mut connect_request));
-                    row.col(|ui| row_label(ui, selected, &format_percent(host.cpu), host, &mut selected_request, &mut connect_request));
-                    row.col(|ui| row_label(ui, selected, &format_percent(host.memory), host, &mut selected_request, &mut connect_request));
-                    row.col(|ui| row_label(ui, selected, &format_percent(host.disk), host, &mut selected_request, &mut connect_request));
-                    row.col(|ui| row_label(ui, selected, host.uptime.as_deref().unwrap_or("-"), host, &mut selected_request, &mut connect_request));
-                    row.col(|ui| row_label(ui, selected, empty_dash(&host.services), host, &mut selected_request, &mut connect_request));
-                    row.col(|ui| row_label(ui, selected, empty_dash(&host.notes), host, &mut selected_request, &mut connect_request));
-                    row.col(|ui| row_label(ui, selected, host.last_checked.as_deref().unwrap_or("-"), host, &mut selected_request, &mut connect_request));
+                    for column in ALL_COLUMNS {
+                        row.col(|ui| {
+                            row_label(
+                                ui,
+                                selected,
+                                &host.field_text(column),
+                                host,
+                                &mut selected_request,
+                                &mut connect_request,
+                            );
+                        });
+                    }
                 });
             });
+
+        self.column_filters = ColumnFilters::from_values(header_filters);
 
         if let Some(column) = sort_request {
             self.set_sort(column);
@@ -720,6 +595,38 @@ impl ConsoleApp {
     }
 }
 
+impl ColumnFilters {
+    fn from_values(values: [String; 11]) -> Self {
+        let [
+            status,
+            host,
+            os,
+            group,
+            cpu,
+            memory,
+            disk,
+            uptime,
+            services,
+            notes,
+            last_checked,
+        ] = values;
+
+        Self {
+            status,
+            host,
+            os,
+            group,
+            cpu,
+            memory,
+            disk,
+            uptime,
+            services,
+            notes,
+            last_checked,
+        }
+    }
+}
+
 impl eframe::App for ConsoleApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.apply_theme(ctx);
@@ -750,7 +657,7 @@ fn configure_fonts(ctx: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();
     fonts.font_data.insert(
         CONSOLE_FONT_NAME.to_string(),
-        egui::FontData::from_static(font_bytes),
+        egui::FontData::from_static(font_bytes).into(),
     );
 
     for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
@@ -812,17 +719,25 @@ fn row_label(
     }
 }
 
-fn column_matches(value: &str, filter: &str) -> bool {
-    let filter = filter.trim().to_lowercase();
-    filter.is_empty() || value.to_lowercase().contains(&filter)
+fn column_label(column: SortColumn) -> &'static str {
+    match column {
+        SortColumn::Status => "Status",
+        SortColumn::Host => "Host",
+        SortColumn::Os => "OS",
+        SortColumn::Group => "Group",
+        SortColumn::Cpu => "CPU",
+        SortColumn::Memory => "Memory",
+        SortColumn::Disk => "Disk",
+        SortColumn::Uptime => "Uptime",
+        SortColumn::Services => "Services",
+        SortColumn::Notes => "Notes",
+        SortColumn::LastChecked => "Last checked",
+    }
 }
 
-fn empty_dash(value: &str) -> &str {
-    if value.trim().is_empty() {
-        "-"
-    } else {
-        value
-    }
+fn text_matches(value: &str, filter: &str) -> bool {
+    let filter = filter.trim().to_lowercase();
+    filter.is_empty() || value.to_lowercase().contains(&filter)
 }
 
 fn format_percent(value: Option<f64>) -> String {
@@ -833,17 +748,10 @@ fn format_percent(value: Option<f64>) -> String {
 
 fn compare_hosts(left: &HostRow, right: &HostRow, column: SortColumn) -> Ordering {
     match column {
-        SortColumn::Status => cmp_text(&left.status, &right.status),
-        SortColumn::Host => cmp_text(&left.server_name, &right.server_name),
-        SortColumn::Os => cmp_text(&left.os_type, &right.os_type),
-        SortColumn::Group => cmp_text(&left.group_name, &right.group_name),
         SortColumn::Cpu => cmp_opt_f64(left.cpu, right.cpu),
         SortColumn::Memory => cmp_opt_f64(left.memory, right.memory),
         SortColumn::Disk => cmp_opt_f64(left.disk, right.disk),
-        SortColumn::Uptime => left.uptime.cmp(&right.uptime),
-        SortColumn::Services => cmp_text(&left.services, &right.services),
-        SortColumn::Notes => cmp_text(&left.notes, &right.notes),
-        SortColumn::LastChecked => left.last_checked.cmp(&right.last_checked),
+        _ => cmp_text(&left.field_text(column), &right.field_text(column)),
     }
 }
 
