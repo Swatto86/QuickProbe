@@ -301,13 +301,11 @@ impl LinuxRemoteSession {
                         }
                     }
                 }
-                "inet6" => {
+                "inet6" if !addr_value.starts_with("fe80:") => {
                     // Skip link-local addresses (fe80::)
-                    if !addr_value.starts_with("fe80:") {
-                        let addr_clean = addr_value.split('/').next().unwrap_or(addr_value);
-                        if !addr_clean.is_empty() {
-                            adapter.ipv6.push(addr_clean.to_string());
-                        }
+                    let addr_clean = addr_value.split('/').next().unwrap_or(addr_value);
+                    if !addr_clean.is_empty() {
+                        adapter.ipv6.push(addr_clean.to_string());
                     }
                 }
                 _ => {}
