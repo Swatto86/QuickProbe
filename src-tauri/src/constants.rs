@@ -28,8 +28,7 @@ pub const CREATE_NO_WINDOW: u32 = 0x08000000;
 /// Absolute path to Windows PowerShell.
 ///
 /// Using an absolute path avoids resolving a different executable from PATH or
-/// the current working directory when the standalone console runs from another
-/// tool or deployment folder.
+/// the current working directory.
 #[cfg(windows)]
 pub fn powershell_exe_path() -> std::path::PathBuf {
     let system_root = std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into());
