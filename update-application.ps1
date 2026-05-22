@@ -19,8 +19,8 @@
     Release notes/changelog for this version. Can be multi-line.
 
 .PARAMETER Force
-    If specified, allows overwriting an existing version/tag. Will delete the existing tag
-    locally and remotely before creating the new one.
+    If specified, allows overwriting the matching version/tag. Will delete the existing
+    release for that tag, plus the local and remote tag, before creating the new one.
 
 .EXAMPLE
     .\update-application.ps1 -Version "1.2.0" -Notes "Added dark mode support"
@@ -159,71 +159,6 @@ function Test-GitTagExists {
     return -not [string]::IsNullOrWhiteSpace($exists)
 }
 
-function Remove-OldTagsAndReleases {
-    param([string]$NewTag)
-    
-    Write-Step "Cleaning up old tags and releases"
-    
-    # Get all local tags
-    $allTags = git tag -l 2>$null | Where-Object { $_ -match '^v\d+\.\d+\.\d+$' }
-    
-    if ($allTags.Count -eq 0) {
-        Write-ColorOutput "  No existing version tags found" "Gray"
-        return
-    }
-    
-    $tagsToDelete = $allTags | Where-Object { $_ -ne $NewTag }
-    
-    if ($tagsToDelete.Count -eq 0) {
-        Write-ColorOutput "  No old tags to remove" "Gray"
-        return
-    }
-    
-    Write-ColorOutput "  Found $($tagsToDelete.Count) old tag(s) to remove" "White"
-    
-    foreach ($tag in $tagsToDelete) {
-        Write-ColorOutput "  Removing tag: $tag" "Gray"
-        
-        # Delete GitHub release first (if gh CLI is available)
-        $ghAvailable = Get-Command gh -ErrorAction SilentlyContinue
-        if ($ghAvailable) {
-            # Check if release exists and delete it
-            $null = gh release view $tag 2>$null
-            if ($LASTEXITCODE -eq 0) {
-                Write-ColorOutput "    Deleting GitHub release for $tag..." "Gray"
-                gh release delete $tag --yes 2>$null
-                if ($LASTEXITCODE -eq 0) {
-                    Write-ColorOutput "    Deleted GitHub release: $tag" "Green"
-                }
-                else {
-                    Write-WarningMsg "    Failed to delete GitHub release: $tag (may not exist)"
-                }
-            }
-        }
-        else {
-            Write-WarningMsg "    GitHub CLI (gh) not found - skipping release deletion for $tag"
-            Write-ColorOutput "    Install gh: https://cli.github.com/" "Gray"
-        }
-        
-        # Delete remote tag
-        git push origin --delete $tag 2>$null
-        if ($LASTEXITCODE -eq 0) {
-            Write-ColorOutput "    Deleted remote tag: $tag" "Green"
-        }
-        else {
-            Write-ColorOutput "    Remote tag $tag may not exist or already deleted" "Gray"
-        }
-        
-        # Delete local tag
-        git tag -d $tag 2>$null
-        if ($LASTEXITCODE -eq 0) {
-            Write-ColorOutput "    Deleted local tag: $tag" "Green"
-        }
-    }
-    
-    Write-SuccessMsg "Cleaned up $($tagsToDelete.Count) old tag(s) and their releases"
-}
-
 # ============================================================================
 # Main Script
 # ============================================================================
@@ -279,7 +214,21 @@ if ($comparison -lt 0 -and -not $Force) {
 $tagName = "v$Version"
 if (Test-GitTagExists $tagName) {
     if ($Force) {
-        Write-WarningMsg "Tag $tagName exists. Deleting it (Force mode)..."
+        Write-WarningMsg "Tag $tagName exists. Replacing it (Force mode)..."
+        
+        # Delete the matching GitHub release first, if present. Historical releases are left intact.
+        $ghAvailable = Get-Command gh -ErrorAction SilentlyContinue
+        if ($ghAvailable) {
+            $null = gh release view $tagName 2>$null
+            if ($LASTEXITCODE -eq 0) {
+                Write-ColorOutput "  Deleting GitHub release for $tagName..." "Gray"
+                gh release delete $tagName --yes 2>$null
+                if ($LASTEXITCODE -ne 0) {
+                    Write-ErrorMsg "Failed to delete GitHub release $tagName"
+                    exit 1
+                }
+            }
+        }
         
         # Delete local tag
         git tag -d $tagName 2>$null
@@ -287,7 +236,7 @@ if (Test-GitTagExists $tagName) {
         # Delete remote tag
         git push origin --delete $tagName 2>$null
         
-        Write-SuccessMsg "Deleted existing tag $tagName"
+        Write-SuccessMsg "Deleted existing tag/release $tagName"
     }
     else {
         Write-ErrorMsg "Tag $tagName already exists. Use -Force to overwrite, or choose a different version."
@@ -341,9 +290,6 @@ if (-not (Test-GitClean)) {
         exit 0
     }
 }
-
-# Remove old tags and releases before creating the new one
-Remove-OldTagsAndReleases -NewTag $tagName
 
 # Update version files
 Write-Step "Updating Cargo.toml"
