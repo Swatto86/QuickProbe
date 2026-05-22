@@ -3,7 +3,8 @@ use std::fs;
 use std::path::PathBuf;
 
 fn main() {
-    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR set"));
+    let manifest_dir =
+        PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR set"));
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR set"));
     let font_path = manifest_dir
         .join("assets")

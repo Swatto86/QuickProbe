@@ -4,6 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use quickprobe::constants::powershell_exe_path;
 use quickprobe::models::{CredentialProfile, Credentials, SecureString, Username};
 use quickprobe::platform::WindowsCredentialManager;
 use quickprobe::CredentialStore;
@@ -511,7 +512,7 @@ pub(crate) async fn launch_remote_registry(server: String) -> Result<(), String>
         safe_name
     );
 
-    let result = Command::new("powershell.exe")
+    let result = Command::new(powershell_exe_path())
         .args(["-NoProfile", "-NonInteractive", "-Command", &ps_script])
         .creation_flags(CREATE_NO_WINDOW)
         .spawn();

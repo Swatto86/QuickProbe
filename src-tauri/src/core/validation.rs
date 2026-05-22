@@ -2,6 +2,7 @@
 //!
 //! Validates Windows credentials using Windows account validation.
 
+use crate::constants::powershell_exe_path;
 use crate::models::{Credentials, Username};
 use crate::utils::ValidationError;
 use std::process::Stdio;
@@ -96,7 +97,7 @@ try {
 
     // Execute PowerShell - hide window on Windows.
     // Bound the validation to avoid hanging UI when domain lookups are slow.
-    let mut cmd = Command::new("powershell.exe");
+    let mut cmd = Command::new(powershell_exe_path());
     cmd.args(["-NoProfile", "-NonInteractive", "-Command", script])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
