@@ -17,6 +17,7 @@
 //! `validate_reachability()` for explicit checks on user-initiated
 //! actions.
 
+use crate::constants::powershell_exe_path;
 use crate::core::{
     session::{
         DiskInfo, FirewallProfile, MemoryInfo, NetAdapterInfo, OsInfo, PendingRebootStatus,
@@ -789,7 +790,7 @@ try {
     exit 1
 }"#;
 
-            let mut cmd = Command::new("powershell.exe");
+            let mut cmd = Command::new(powershell_exe_path());
             cmd.arg("-NoProfile")
                 .arg("-NonInteractive")
                 .arg("-Command")
@@ -981,7 +982,7 @@ function Get-ProcessSample {{
     $map = @{{}}
     foreach ($p in $first) {{ if ($p.Id) {{ $map[$p.Id] = $p }} }}
 
-    return foreach ($p in $second) {{
+    $result = foreach ($p in $second) {{
         if (-not $p.Id) {{ continue }}
         $cpu1 = $null
         if ($map.ContainsKey($p.Id)) {{ $cpu1 = $map[$p.Id].CPU }}
@@ -995,6 +996,7 @@ function Get-ProcessSample {{
             cpu_percent = $pct
         }}
     }}
+    return $result
 }}
 
 function Get-MemoryInfo {{
@@ -1192,7 +1194,6 @@ function Get-NetAdapters {{
             }}
     }} catch {{
         $adapters = @()
-    }}
     }}
 
     # Return adapters or empty array if both methods failed
@@ -1588,7 +1589,7 @@ try {
         let output = tokio::task::spawn_blocking(move || {
             use std::io::Write;
 
-            let mut cmd = Command::new("powershell.exe");
+            let mut cmd = Command::new(powershell_exe_path());
             cmd.arg("-NoProfile")
                 .arg("-NonInteractive")
                 .arg("-Command")
@@ -1601,9 +1602,9 @@ try {
             #[cfg(windows)]
             cmd.creation_flags(CREATE_NO_WINDOW);
 
-            let mut child = cmd.spawn().map_err(|e| {
-                std::io::Error::other(format!("Failed to spawn powershell.exe: {}", e))
-            })?;
+            let mut child = cmd
+                .spawn()
+                .map_err(|e| std::io::Error::other(format!("Failed to spawn PowerShell: {}", e)))?;
 
             {
                 let mut stdin = child

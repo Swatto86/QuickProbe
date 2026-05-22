@@ -294,7 +294,9 @@ impl LinuxRemoteSession {
                     let addr_parts: Vec<&str> = addr_value.split('/').collect();
                     if !addr_parts.is_empty() && !addr_parts[0].is_empty() {
                         adapter.ipv4.push(addr_parts[0].to_string());
-                        if let Some(Ok(prefix)) = addr_parts.get(1).map(|value| value.parse::<u32>()) {
+                        if let Some(Ok(prefix)) =
+                            addr_parts.get(1).map(|value| value.parse::<u32>())
+                        {
                             adapter.ipv4_prefix.push(prefix);
                         }
                     }
