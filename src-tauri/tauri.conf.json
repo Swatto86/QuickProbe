@@ -1,11 +1,11 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "QuickProbe",
-  "version": "2.1.3",
+  "version": "2.1.4",
   "identifier": "com.swatto.quickprobe",
   "build": {
-    "beforeDevCommand": "",
-    "beforeBuildCommand": "",
+    "beforeDevCommand": "npm run build:css",
+    "beforeBuildCommand": "npm run build:css",
     "frontendDist": "../ui"
   },
   "app": {
