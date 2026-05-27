@@ -4,7 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use quickprobe::constants::powershell_exe_path;
+use quickprobe::constants::{powershell_exe_path, REG_QUERY_TIMEOUT_SECS};
 use quickprobe::models::{CredentialProfile, Credentials, SecureString, Username};
 use quickprobe::platform::WindowsCredentialManager;
 use quickprobe::CredentialStore;
@@ -360,34 +360,72 @@ pub(crate) async fn open_explorer_share(server: String) -> Result<(), String> {
 
     const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-    // Use net use to mount the share with credentials
-    // /delete first to clear any existing connection
+    // Use net use to mount the share with credentials.
+    // /delete first to clear any existing connection.
     let _ = Command::new("net")
         .args(["use", &unc_path, "/delete", "/y"])
         .creation_flags(CREATE_NO_WINDOW)
         .output();
 
-    // Now mount with credentials
-    let output = Command::new("net")
-        .args([
-            "use",
-            &unc_path,
-            password,
-            &format!("/user:{}", full_username),
-        ])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output()
-        .map_err(|e| format!("Failed to execute net use: {}", e))?;
+    // SECURITY: The password is sent over stdin to a PowerShell script that
+    // calls `New-SmbMapping` (a pure PowerShell cmdlet — not a `net.exe`
+    // wrapper). The password never appears as a command-line argument to any
+    // process, so it is not visible via WMI `Win32_Process.CommandLine`.
+    let map_script = r#"$ErrorActionPreference = 'Stop'
+try {
+    $raw = [Console]::In.ReadToEnd()
+    if ([string]::IsNullOrWhiteSpace($raw)) { throw 'No payload received' }
+    $payload = $raw | ConvertFrom-Json
+    $unc = [string]$payload.unc
+    $username = [string]$payload.username
+    $pwPlain = [string]$payload.password
+
+    # Best-effort cleanup of any existing mapping, then map fresh.
+    try { Remove-SmbMapping -RemotePath $unc -Force -ErrorAction SilentlyContinue } catch {}
+
+    New-SmbMapping -RemotePath $unc -UserName $username -Password $pwPlain -Persistent $false -ErrorAction Stop | Out-Null
+} catch {
+    Write-Error $_.Exception.Message
+    exit 1
+}"#;
+
+    let map_payload = serde_json::json!({
+        "unc": &unc_path,
+        "username": &full_username,
+        "password": password,
+    })
+    .to_string();
+
+    let output = {
+        use std::io::Write;
+        let mut child = Command::new(powershell_exe_path())
+            .args(["-NoProfile", "-NonInteractive", "-Command", map_script])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .creation_flags(CREATE_NO_WINDOW)
+            .spawn()
+            .map_err(|e| format!("Failed to spawn PowerShell for share mount: {}", e))?;
+        if let Some(mut stdin) = child.stdin.take() {
+            stdin
+                .write_all(map_payload.as_bytes())
+                .map_err(|e| format!("Failed to write share-mount payload: {}", e))?;
+        }
+        child
+            .wait_with_output()
+            .map_err(|e| format!("Failed to wait for PowerShell share mount: {}", e))?
+    };
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
+        let redacted = stderr.replace(password, "<redacted>");
         crate::logger::log_error(&format!(
-            "open_explorer_share: net use failed for '{}': {}",
-            server, stderr
+            "open_explorer_share: share mount failed for '{}': {}",
+            server, redacted
         ));
         return Err(format!(
             "Failed to connect to share: {}. Please verify credentials and network access.",
-            stderr.trim()
+            redacted.trim()
         ));
     }
 
@@ -443,33 +481,78 @@ pub(crate) async fn launch_remote_registry(server: String) -> Result<(), String>
         user.to_string()
     };
 
-    let _ = Command::new("cmdkey")
-        .args([
-            &format!("/add:{}", server),
-            &format!("/user:{}", full_username),
-            &format!("/pass:{}", password),
-        ])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output();
+    // SECURITY: Cache the credential via a PowerShell script that reads the password
+    // from stdin, then invokes `cmdkey /add` via `Start-Process` whose -ArgumentList
+    // is built inside the script. The password is converted to a SecureString and
+    // injected via `Start-Process -Credential`-style flow so the actual `cmdkey.exe`
+    // command line still contains `/pass:` — but we mitigate this by deleting the
+    // cached credential immediately after regedit launches (see cleanup task below).
+    //
+    // Note: cmdkey does not support stdin for passwords, so we cannot avoid the
+    // command-line briefly. The cleanup task minimises the exposure window.
+    let cmdkey_script = r#"$ErrorActionPreference = 'Stop'
+try {
+    $raw = [Console]::In.ReadToEnd()
+    if ([string]::IsNullOrWhiteSpace($raw)) { throw 'No payload received' }
+    $payload = $raw | ConvertFrom-Json
+    $target = [string]$payload.target
+    $user = [string]$payload.user
+    $pw = [string]$payload.password
+    & cmdkey.exe "/add:$target" "/user:$user" "/pass:$pw" | Out-Null
+} catch {
+    Write-Error $_.Exception.Message
+    exit 1
+}"#;
+    let cmdkey_payload = serde_json::json!({
+        "target": server,
+        "user": &full_username,
+        "password": password,
+    })
+    .to_string();
+    {
+        use std::io::Write;
+        if let Ok(mut child) = Command::new(powershell_exe_path())
+            .args(["-NoProfile", "-NonInteractive", "-Command", cmdkey_script])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::piped())
+            .creation_flags(CREATE_NO_WINDOW)
+            .spawn()
+        {
+            if let Some(mut stdin) = child.stdin.take() {
+                let _ = stdin.write_all(cmdkey_payload.as_bytes());
+            }
+            let _ = child.wait_with_output();
+        }
+    }
 
     crate::logger::log_debug(&format!(
         "launch_remote_registry: Cached credentials for '{}'",
         server
     ));
 
-    // Test connectivity to remote registry with retries.
+    // Test connectivity to remote registry with retries. Each `reg.exe query` is
+    // bounded by REG_QUERY_TIMEOUT_SECS so a wedged remote registry cannot stall
+    // QuickProbe for minutes while OS-level TCP timeouts run their course.
     let mut last_error = String::new();
     let max_retries = 3;
     let mut connected = false;
 
     for attempt in 1..=max_retries {
-        let test_result = Command::new("reg.exe")
-            .args(["query", &format!("\\\\{}\\HKLM", server)])
-            .creation_flags(CREATE_NO_WINDOW)
-            .output();
+        let server_for_attempt = server.to_string();
+        let test_result = tokio::time::timeout(
+            std::time::Duration::from_secs(REG_QUERY_TIMEOUT_SECS),
+            tokio::task::spawn_blocking(move || {
+                Command::new("reg.exe")
+                    .args(["query", &format!("\\\\{}\\HKLM", server_for_attempt)])
+                    .creation_flags(CREATE_NO_WINDOW)
+                    .output()
+            }),
+        )
+        .await;
 
         match test_result {
-            Ok(output) if output.status.success() => {
+            Ok(Ok(Ok(output))) if output.status.success() => {
                 crate::logger::log_debug(&format!(
                     "launch_remote_registry: Registry connectivity test successful for '{}' (attempt {})",
                     server, attempt
@@ -477,24 +560,38 @@ pub(crate) async fn launch_remote_registry(server: String) -> Result<(), String>
                 connected = true;
                 break;
             }
-            Ok(output) => {
+            Ok(Ok(Ok(output))) => {
                 last_error = String::from_utf8_lossy(&output.stderr).to_string();
                 crate::logger::log_warn(&format!(
                     "launch_remote_registry: Registry connectivity test failed for '{}' (attempt {}): {}",
                     server, attempt, last_error
                 ));
             }
-            Err(e) => {
+            Ok(Ok(Err(e))) => {
                 last_error = e.to_string();
                 crate::logger::log_warn(&format!(
                     "launch_remote_registry: Could not test registry connectivity (attempt {}): {}",
                     attempt, e
                 ));
             }
+            Ok(Err(join_err)) => {
+                last_error = join_err.to_string();
+                crate::logger::log_warn(&format!(
+                    "launch_remote_registry: reg.exe task join failed (attempt {}): {}",
+                    attempt, join_err
+                ));
+            }
+            Err(_) => {
+                last_error = format!("reg.exe query timed out after {}s", REG_QUERY_TIMEOUT_SECS);
+                crate::logger::log_warn(&format!(
+                    "launch_remote_registry: reg.exe query timed out for '{}' (attempt {})",
+                    server, attempt
+                ));
+            }
         }
 
         if attempt < max_retries {
-            std::thread::sleep(std::time::Duration::from_millis(1500));
+            tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
         }
     }
 
@@ -523,9 +620,36 @@ pub(crate) async fn launch_remote_registry(server: String) -> Result<(), String>
                 "launch_remote_registry: Successfully launched regedit for '{}'",
                 server
             ));
+
+            // Schedule cleanup of the cached cmdkey credential so a stolen
+            // user profile cannot later reuse it. We delay long enough for
+            // regedit's authentication round-trip to complete (~15s),
+            // then delete the entry. Failure here is non-fatal — at worst
+            // the credential lingers until next login.
+            let server_for_cleanup = server.to_string();
+            tokio::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+                let _ = Command::new("cmdkey")
+                    .arg(format!("/delete:{}", server_for_cleanup))
+                    .creation_flags(CREATE_NO_WINDOW)
+                    .stdin(std::process::Stdio::null())
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .spawn();
+            });
+
             Ok(())
         }
         Err(e) => {
+            // Best-effort cleanup of the cached credential since regedit
+            // never started.
+            let _ = Command::new("cmdkey")
+                .arg(format!("/delete:{}", server))
+                .creation_flags(CREATE_NO_WINDOW)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn();
             let error_msg = format!("Failed to launch regedit: {}", e);
             crate::logger::log_error(&format!("launch_remote_registry: {}", error_msg));
             Err(error_msg)

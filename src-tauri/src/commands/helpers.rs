@@ -109,7 +109,7 @@ pub(crate) fn kv_default_value(key: &str) -> Option<String> {
     match key {
         "qp_settings" => Some(default_qp_settings_json()),
         "qp_server_order" => Some("[]".to_string()),
-        "qp_host_view_mode" => Some("cards".to_string()),
+        "qp_host_view_mode" => Some("table".to_string()),
         "qp_hosts_changed" => None,
         _ => None,
     }
@@ -167,7 +167,7 @@ pub(crate) fn default_settings_bundle() -> SettingsBundle {
     SettingsBundle {
         qp_settings,
         qp_server_order: serde_json::json!([]),
-        qp_host_view_mode: serde_json::json!("cards"),
+        qp_host_view_mode: serde_json::json!("table"),
         qp_hosts_changed: None,
     }
 }
@@ -255,14 +255,14 @@ pub(crate) fn normalize_host_view_mode(value: serde_json::Value) -> serde_json::
     match value {
         serde_json::Value::String(s) => {
             let lower = s.to_ascii_lowercase();
-            if lower == "cards" || lower == "groups" {
+            if lower == "cards" || lower == "groups" || lower == "table" {
                 serde_json::Value::String(lower)
             } else {
-                serde_json::json!("cards")
+                serde_json::json!("table")
             }
         }
-        serde_json::Value::Null => serde_json::json!("cards"),
-        _ => serde_json::json!("cards"),
+        serde_json::Value::Null => serde_json::json!("table"),
+        _ => serde_json::json!("table"),
     }
 }
 

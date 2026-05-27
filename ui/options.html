@@ -144,9 +144,9 @@
                         <span class="label-text font-medium">Default Dashboard View</span>
                     </label>
                     <select id="host-view-select" class="select select-bordered w-full max-w-md">
+                        <option value="table">Table (spreadsheet) — default</option>
                         <option value="cards">Cards (detailed)</option>
                         <option value="groups">Groups</option>
-                        <option value="table">Table (spreadsheet)</option>
                     </select>
                     <label class="label">
                         <span class="label-text-alt text-base-content/60">Table view shows more servers at once in a
@@ -420,7 +420,7 @@
         const settingsDefaultBundle = () => ({
             qp_settings: defaultSettings(),
             qp_server_order: [],
-            qp_host_view_mode: 'cards',
+            qp_host_view_mode: 'table',
             qp_hosts_changed: null,
         });
         let settingsBundle = settingsDefaultBundle();

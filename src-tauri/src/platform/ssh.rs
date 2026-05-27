@@ -3,6 +3,7 @@
 //! Provides a minimal SSH-based `RemoteSession` implementation so the Windows
 //! UI can probe Linux hosts without WinRM/PowerShell.
 
+use crate::constants::REMOTE_SSH_TIMEOUT_SECS;
 use crate::core::session::{
     DiskInfo, MemoryInfo, NetAdapterInfo, OsInfo, ProcessInfo, RemoteSession, ServiceInfo,
     SessionOs, UptimeSnapshot,
@@ -70,8 +71,9 @@ impl LinuxRemoteSession {
         let username = self.username.clone();
         let password = self.password.as_str().to_string();
         let command = command.to_string();
+        let host_for_log = host.clone();
 
-        tokio::task::spawn_blocking(move || {
+        let blocking = tokio::task::spawn_blocking(move || {
             let tcp = TcpStream::connect((host.as_str(), port))
                 .map_err(|e| format!("SSH connect to {}:{} failed: {}", host, port, e))?;
             tcp.set_read_timeout(Some(Duration::from_secs(10))).ok();
@@ -113,9 +115,20 @@ impl LinuxRemoteSession {
             }
 
             Ok(stdout)
-        })
-        .await
-        .map_err(|e| format!("SSH task failed: {e}"))?
+        });
+
+        // Hard cap on total SSH execution time. The 10s socket timeouts above only
+        // bound a single read/write; this bounds the entire connect → auth → exec →
+        // read cycle so a stalled remote shell cannot hang the caller.
+        let timeout = Duration::from_secs(REMOTE_SSH_TIMEOUT_SECS);
+        match tokio::time::timeout(timeout, blocking).await {
+            Ok(join_result) => join_result.map_err(|e| format!("SSH task failed: {e}"))?,
+            Err(_) => Err(format!(
+                "SSH command on '{}' timed out after {}s",
+                host_for_log,
+                timeout.as_secs()
+            )),
+        }
     }
 
     fn parse_os_release(raw: &str) -> (String, String) {
@@ -351,8 +364,9 @@ impl LinuxRemoteSession {
         let username = self.username.clone();
         let password = self.password.as_str().to_string();
         let command = command.to_string();
+        let host_for_log = host.clone();
 
-        tokio::task::spawn_blocking(move || {
+        let blocking = tokio::task::spawn_blocking(move || {
             let tcp = TcpStream::connect((host.as_str(), port))
                 .map_err(|e| format!("SSH connect to {}:{} failed: {}", host, port, e))?;
             tcp.set_read_timeout(Some(Duration::from_secs(30))).ok();
@@ -400,9 +414,17 @@ impl LinuxRemoteSession {
             }
 
             Ok(output)
-        })
-        .await
-        .map_err(|e| format!("SSH task failed: {e}"))?
+        });
+
+        let timeout = Duration::from_secs(REMOTE_SSH_TIMEOUT_SECS);
+        match tokio::time::timeout(timeout, blocking).await {
+            Ok(join_result) => join_result.map_err(|e| format!("SSH task failed: {e}"))?,
+            Err(_) => Err(format!(
+                "SSH PTY command on '{}' timed out after {}s",
+                host_for_log,
+                timeout.as_secs()
+            )),
+        }
     }
 }
 
