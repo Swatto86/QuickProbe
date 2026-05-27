@@ -45,27 +45,38 @@ Push-Location $repoRoot
 
 try {
     # ── 1. Format Check ──────────────────────────────────────────────
-    Write-Section "1/4 — Format Check"
+    Write-Section "1/5 — Format Check"
     Invoke-Step "cargo fmt --check (Tauri)" {
         cargo fmt --check --manifest-path src-tauri/Cargo.toml
     }
 
     # ── 2. Lint / Static Analysis ─────────────────────────────────────
-    Write-Section "2/4 — Lint (Clippy)"
+    Write-Section "2/5 — Lint (Clippy)"
     Invoke-Step "cargo clippy --lib -D warnings" {
         cargo clippy --lib --manifest-path src-tauri/Cargo.toml -- -D warnings
     }
 
     # ── 3. Tests ──────────────────────────────────────────────────────
-    Write-Section "3/4 — Tests"
+    Write-Section "3/5 — Tests"
     Invoke-Step "cargo test --lib" {
         cargo test --lib --manifest-path src-tauri/Cargo.toml
     }
 
     # ── 4. Build (release) ────────────────────────────────────────────
-    Write-Section "4/4 — Build (library, release mode)"
+    Write-Section "4/5 — Build (library, release mode)"
     Invoke-Step "cargo build --lib --release" {
         cargo build --lib --release --manifest-path src-tauri/Cargo.toml
+    }
+
+    # ── 5. Full Tauri bundle (frontend + binary + installer) ─────────
+    # Catches frontend-bundling regressions — e.g. an empty `beforeBuildCommand`
+    # that ships an installer without generated CSS (see CHANGELOG 2.1.4).
+    Write-Section "5/5 — Full Tauri Bundle (release)"
+    Invoke-Step "npm ci (install frontend deps)" {
+        npm ci
+    }
+    Invoke-Step "npx tauri build (frontend + bin + NSIS installer)" {
+        npx tauri build
     }
 
     # ── Summary ───────────────────────────────────────────────────────
