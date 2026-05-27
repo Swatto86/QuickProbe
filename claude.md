@@ -81,9 +81,11 @@ QuickProbe/
 │   ├── hosts.spec.js
 │   └── options.spec.js
 ├── scripts/
-│   └── verify.ps1                # THE single gate: fmt → clippy → test → build
+│   └── verify.ps1                # THE single gate: fmt → clippy --all-targets → test → lib build → full tauri build (NSIS)
+├── rust-toolchain.toml            # Pins rustc version (auto-installed by rustup; must be at repo root, not src-tauri/, so cargo finds it from any cwd)
 ├── src-tauri/
 │   ├── Cargo.toml                # Rust deps & features
+│   ├── Cargo.lock                # Locked dep graph (committed — bin crate)
 │   ├── build.rs                  # Tauri build script
 │   ├── tauri.conf.json           # App windows, bundle, CSP, updater
 │   ├── capabilities/default.json # Tauri v2 permissions
@@ -140,9 +142,12 @@ QuickProbe/
 │   ├── about.html                # About dialog
 │   ├── update-required.html      # Mandatory update prompt
 │   ├── app.js                    # Shared Tauri IPC helpers
+│   ├── dashboard.js              # Main dashboard logic (largest UI file)
 │   ├── dashboard-utils.js        # Dashboard utility functions
-│   ├── theme.js                  # DaisyUI theme switching
-│   └── input.css → styles.css    # Tailwind CSS pipeline
+│   ├── dashboard-minimal.css     # Dashboard-specific overrides (sticky header, etc.)
+│   ├── theme.js                  # DaisyUI theme switching + cross-window sync
+│   ├── update-required.js        # Mandatory update prompt logic
+│   └── input.css → styles.css    # Tailwind CSS pipeline (styles.css is GENERATED — gitignored)
 ├── claude.md                      # ← THIS FILE (Project Atlas)
 ├── CHANGELOG.md                   # Keep-a-Changelog format
 ├── README.md                      # User-facing documentation
@@ -168,11 +173,16 @@ QuickProbe/
 |---|---|
 | **Auth** | `login`, `login_local_mode`, `logout`, `check_saved_credentials`, `login_with_saved_credentials`, `get_login_mode` |
 | **Hosts** | `get_hosts`, `set_hosts`, `update_host`, `save_server_notes`, `rename_group` |
-| **Probes** | `get_system_health`, `cache_get_dashboard`, `cache_set_dashboard`, `persist_health_snapshot`, `load_health_snapshots` |
-| **Remote actions** | `launch_rdp`, `launch_ssh`, `open_explorer_share`, `launch_remote_registry`, `remote_restart`, `remote_shutdown` |
-| **Backup** | `export_backup_encrypted`, `import_backup_encrypted`, `export_hosts_csv` |
+| **Health / probes** | `get_system_health`, `get_quick_status`, `fetch_os_info`, `fetch_net_adapters`, `cache_get_dashboard`, `cache_set_dashboard`, `persist_health_snapshot`, `load_health_snapshots` |
+| **Remote actions** | `launch_rdp`, `launch_ssh`, `open_explorer_share`, `launch_remote_registry`, `remote_restart`, `remote_shutdown`, `execute_remote_powershell`, `execute_remote_ssh`, `execute_remote_ssh_pty` |
+| **Services & processes** | `get_remote_services`, `get_remote_processes`, `control_service`, `kill_process` |
+| **LDAP / AD** | `scan_domain` (disabled in UI when `get_login_mode` = `"local"`) |
+| **Backup / export** | `export_backup_encrypted`, `import_backup_encrypted`, `export_hosts_csv` |
 | **Settings** | `settings_get_all`, `settings_set_all`, `check_autostart`, `toggle_autostart`, `get_start_hidden_setting`, `set_start_hidden_setting` |
-| **System** | `get_app_info`, `get_runtime_mode_info`, `enable_options_menu`, `save_rdp_credentials` |
+| **System / updater** | `get_app_info`, `get_runtime_mode_info`, `enable_options_menu`, `save_rdp_credentials`, `check_for_update`, `download_and_install_update`, `debug_local_store_status`, `open_logs_folder` (debug builds only) |
+| **Logging relay (frontend → file)** | `log_debug`, `log_info`, `log_warn`, `log_error` |
+
+> When you add a new `#[tauri::command]`, register it in `generate_handler![]` in `main.rs` AND add it to this table. The total count is asserted nowhere in code — staleness is detected only via PR review.
 
 ### CLI / Scripts
 
@@ -186,6 +196,18 @@ QuickProbe/
 ---
 
 ## 5. Build, Test, CI & Release
+
+### Cold-start checklist (fresh clone)
+
+A fresh clone is **not** ready to build — read this before the first `tauri build`/`tauri dev`:
+
+1. **`npm ci`** — installs frontend devDeps. Without it, `tauri build` fails before any Rust step.
+2. **Rust toolchain auto-installs.** `src-tauri/rust-toolchain.toml` pins the version; rustup downloads it the first time you run `cargo` in this repo. Don't override with `rustup override`.
+3. **`ui/styles.css` is GENERATED**, not source — gitignored. The build pipeline runs `npm run build:css` automatically via `beforeBuildCommand` in `tauri.conf.json`. If you ever edit this config, do NOT empty those fields (past incident: v2.1.3 shipped an installer without CSS → unstyled white windows).
+4. **Verify locally before pushing**: `pwsh -File scripts/verify.ps1`. This is the same gate CI runs; if it passes locally and CI fails, it usually means your rustc is older than CI's pinned version — `rustup update` fixes that.
+5. **Logs**: `%LOCALAPPDATA%\QuickProbe\logs\`. In release builds, file logging is off by default — set `QP_ENABLE_LOGGING=1` to enable, and `QP_LOG_VERBOSE=1` for debug-level output.
+
+### Commands
 
 | Activity | Command / Location |
 |---|---|
@@ -224,6 +246,7 @@ This catches Windows-only clippy lints (e.g. `manual_is_multiple_of` triggered o
 |---|---|---|
 | `src-tauri/tauri.conf.json` | Tauri runtime | App startup |
 | `src-tauri/Cargo.toml` | Rust build | Compile time |
+| `rust-toolchain.toml` (repo root) | Pins rustc channel (currently `1.95.0`) — rustup auto-installs on first `cargo` invocation. **Lives at repo root, not under `src-tauri/`**, so it's found regardless of cwd (verify.ps1 runs cargo from repo root). Keep in lockstep with `dtolnay/rust-toolchain@<version>` in the workflows. | `cargo` startup |
 | `src-tauri/capabilities/default.json` | Tauri v2 permission ACLs | App startup |
 | `package.json` | npm scripts + devDeps | `npm ci` |
 | `tailwind.config.js` | Tailwind CSS pipeline | CSS build |
