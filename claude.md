@@ -189,12 +189,32 @@ QuickProbe/
 
 | Activity | Command / Location |
 |---|---|
-| **Verify (local)** | `pwsh -File scripts/verify.ps1` |
+| **Verify (local, Windows)** | `pwsh -File scripts/verify.ps1` |
+| **Verify (local, Linux/macOS dev)** | See **Cross-platform verification** note below — `cargo clippy --lib --no-default-features` on Linux is **not enough** to match CI |
 | **CI** | `.github/workflows/ci.yml` — runs `verify.ps1` on push/PR to `main` |
 | **Release** | `.github/workflows/release.yml` — tag `v*` triggers verify → NSIS build → GitHub Release |
 | **Rust unit tests** | `cargo test --lib --manifest-path src-tauri/Cargo.toml` |
 | **E2E tests** | `npm run test:e2e` (requires built app + msedgedriver) |
 | **CSS build** | `npm run build:css` (Tailwind → `ui/styles.css`) |
+
+### Cross-platform verification (Linux/macOS dev)
+
+CI runs `cargo clippy --lib -D warnings` on **windows-latest**. Linux/macOS hosts compile a different set of code paths because `pub mod platform;` is `#[cfg(windows)]`-gated in `lib.rs`, so `platform/winrm.rs`, `platform/ssh.rs`, `platform/credman.rs`, and `platform/registry.rs` are entirely **skipped by `cargo clippy` on non-Windows hosts**. A Linux-only check passing tells you nothing about whether CI will pass.
+
+**Before pushing platform/ changes from Linux**, cross-compile with the Windows target:
+
+```bash
+rustup target add x86_64-pc-windows-gnu              # one-time
+sudo apt-get install -y mingw-w64                    # one-time
+CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER=x86_64-w64-mingw32-gcc \
+CC_x86_64_pc_windows_gnu=x86_64-w64-mingw32-gcc \
+CXX_x86_64_pc_windows_gnu=x86_64-w64-mingw32-g++ \
+  cargo clippy --lib --no-default-features \
+    --manifest-path src-tauri/Cargo.toml \
+    --target x86_64-pc-windows-gnu -- -D warnings
+```
+
+This catches Windows-only clippy lints (e.g. `manual_is_multiple_of` triggered on `n % 2 != 0`) and Windows-only compile errors before they reach CI. The `--no-default-features` flag skips the Tauri plugins (which aren't needed for `--lib` checking and would otherwise fail to link without the Windows-specific build tools).
 
 ---
 

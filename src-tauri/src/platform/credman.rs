@@ -168,7 +168,7 @@ impl WindowsCredentialManager {
                     // the buffer if a credential was written by another tool with an
                     // unexpected encoding (DPAPI doesn't enforce length parity).
                     let blob_len = cred.CredentialBlobSize as usize;
-                    if blob_len % 2 != 0 {
+                    if !blob_len.is_multiple_of(2) {
                         CredFree(pcred as *const _);
                         return Err(CredentialError::Platform(format!(
                             "Credential blob for profile '{}' has odd byte length ({}); not a valid UTF-16 password.",
