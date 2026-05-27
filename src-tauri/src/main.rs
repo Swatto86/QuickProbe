@@ -1195,7 +1195,7 @@ mod tests {
                 let server_order = kv_get_value("qp_server_order")?;
                 assert_eq!(server_order.as_deref(), Some("[]"));
                 let host_view_mode = kv_get_value("qp_host_view_mode")?;
-                assert_eq!(host_view_mode.as_deref(), Some("cards"));
+                assert_eq!(host_view_mode.as_deref(), Some("table"));
                 let hosts_changed = kv_get_value("qp_hosts_changed")?;
                 assert!(hosts_changed.is_none());
                 Ok(())
@@ -1239,7 +1239,7 @@ mod tests {
                 serde_json::from_str(&default_qp_settings_json()).unwrap();
             assert_eq!(bundle.qp_settings, expected_settings);
             assert_eq!(bundle.qp_server_order, serde_json::json!([]));
-            assert_eq!(bundle.qp_host_view_mode, serde_json::json!("cards"));
+            assert_eq!(bundle.qp_host_view_mode, serde_json::json!("table"));
             assert!(bundle.qp_hosts_changed.is_none());
             Ok(())
         });
@@ -1318,6 +1318,31 @@ mod tests {
             assert_eq!(bundle.qp_hosts_changed, Some(serde_json::json!("original")));
             assert_eq!(bundle.qp_server_order, serde_json::json!(["A", "B"]));
             assert_eq!(bundle.qp_host_view_mode, serde_json::json!("groups"));
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn settings_set_all_accepts_table_view_mode() {
+        with_temp_appdata(|| {
+            let rt = Runtime::new().map_err(|e| format!("rt build: {}", e))?;
+            let payload = SettingsSetPayload {
+                qp_settings: serde_json::json!({
+                    "probeTimeoutSeconds": 60,
+                    "infoTimeoutMs": 3500,
+                    "warningTimeoutMs": 4500,
+                    "errorTimeoutMs": 0,
+                    "locationMappings": [],
+                    "theme": "system"
+                }),
+                qp_server_order: serde_json::json!([]),
+                qp_host_view_mode: serde_json::json!("table"),
+                qp_hosts_changed: None,
+            };
+            rt.block_on(settings_set_all(payload))?;
+
+            let bundle = rt.block_on(settings_get_all())?;
+            assert_eq!(bundle.qp_host_view_mode, serde_json::json!("table"));
             Ok(())
         });
     }

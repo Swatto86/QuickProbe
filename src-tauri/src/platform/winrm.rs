@@ -17,7 +17,7 @@
 //! `validate_reachability()` for explicit checks on user-initiated
 //! actions.
 
-use crate::constants::powershell_exe_path;
+use crate::constants::{powershell_exe_path, REMOTE_PS_TIMEOUT_SECS};
 use crate::core::{
     session::{
         DiskInfo, FirewallProfile, MemoryInfo, NetAdapterInfo, OsInfo, PendingRebootStatus,
@@ -38,6 +38,40 @@ use std::os::windows::process::CommandExt;
 /// Windows flag to create process without a console window
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+/// Best-effort termination of a possibly-hung PowerShell child.
+///
+/// Used by `execute_remote` and `validate_connectivity` when their tokio timeout
+/// fires before the spawned `powershell.exe` completes. Uses platform-native
+/// process termination so the orphan local process (and its inherited TCP/WinRM
+/// socket to the remote target) is reaped immediately rather than lingering for
+/// minutes waiting on OS-level timeouts.
+fn kill_orphan_process(pid: u32) {
+    #[cfg(windows)]
+    {
+        // `taskkill /F /PID <pid>` is the most reliable way to terminate a hung
+        // PowerShell process on Windows. /T also kills child processes (none
+        // expected here, but harmless).
+        let mut cmd = Command::new("taskkill");
+        cmd.args(["/F", "/T", "/PID", &pid.to_string()])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .creation_flags(CREATE_NO_WINDOW);
+        let _ = cmd.spawn();
+    }
+    #[cfg(not(windows))]
+    {
+        // Non-Windows is only reached in tests / cross-compile contexts. Use
+        // POSIX `kill -9` via shell to avoid pulling in libc.
+        let _ = Command::new("kill")
+            .args(["-9", &pid.to_string()])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn();
+    }
+}
 
 /// Escapes user input for safe embedding in PowerShell -like patterns
 ///
@@ -767,7 +801,13 @@ impl WindowsRemoteSession {
         .map_err(|e| format!("Failed to serialize connectivity payload: {}", e))?;
 
         // Quick test: try Test-WSMan with the provided credentials to avoid 401/kerberos failures.
-        let output = tokio::task::spawn_blocking(move || {
+        // Wrapped in a tokio timeout so an unreachable target cannot hang the UI thread
+        // while waiting on OS-level TCP timeouts.
+        let connect_pid: std::sync::Arc<std::sync::Mutex<Option<u32>>> =
+            std::sync::Arc::new(std::sync::Mutex::new(None));
+        let connect_pid_clone = std::sync::Arc::clone(&connect_pid);
+        let server_for_log = server_name.to_string();
+        let blocking = tokio::task::spawn_blocking(move || {
             use std::io::Write;
 
             let ps_script = r#"$ErrorActionPreference = 'Stop'
@@ -803,6 +843,9 @@ try {
             cmd.creation_flags(CREATE_NO_WINDOW);
 
             let mut child = cmd.spawn()?;
+            if let Ok(mut guard) = connect_pid_clone.lock() {
+                *guard = Some(child.id());
+            }
             {
                 let mut stdin = child.stdin.take().ok_or_else(|| {
                     std::io::Error::other("Failed to open stdin for connectivity check")
@@ -811,10 +854,27 @@ try {
             }
 
             child.wait_with_output()
-        })
-        .await
-        .map_err(|e| format!("Failed to spawn connectivity task: {}", e))?
-        .map_err(|e| format!("Failed to test connectivity: {}", e))?;
+        });
+
+        let timeout = std::time::Duration::from_secs(
+            crate::constants::CREDENTIAL_VALIDATION_TIMEOUT_SECS.max(10),
+        );
+        let output = match tokio::time::timeout(timeout, blocking).await {
+            Ok(join_result) => join_result
+                .map_err(|e| format!("Failed to spawn connectivity task: {}", e))?
+                .map_err(|e| format!("Failed to test connectivity: {}", e))?,
+            Err(_) => {
+                let pid = connect_pid.lock().ok().and_then(|g| *g);
+                if let Some(pid) = pid {
+                    kill_orphan_process(pid);
+                }
+                return Err(format!(
+                    "Connectivity check for '{}' timed out after {}s",
+                    server_for_log,
+                    timeout.as_secs()
+                ));
+            }
+        };
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -1579,14 +1639,28 @@ try {
     Write-Error $_.Exception.Message
     exit 1
 } finally {
-    # Explicitly destroy the remote session to free wsmprovhost.exe on the target server immediately
+    # Explicitly destroy the remote session to free wsmprovhost.exe on the target server immediately.
+    # Surface cleanup failures on stderr (without failing the overall exit code) so callers
+    # can correlate them with leaked wsmprovhost.exe processes on the remote target.
     if ($session) {
-        Remove-PSSession -Session $session -ErrorAction SilentlyContinue
+        try {
+            Remove-PSSession -Session $session -ErrorAction Stop
+        } catch {
+            [Console]::Error.WriteLine("WARN: Remove-PSSession failed: " + $_.Exception.Message)
+        }
     }
 }"#;
 
-        // Execute in background to avoid blocking.
-        let output = tokio::task::spawn_blocking(move || {
+        // Execute in background to avoid blocking. A hard timeout is enforced here so a
+        // slow/unreachable target cannot hang the tokio blocking pool indefinitely; on
+        // timeout we kill the local PowerShell child via the shared PID handle, which
+        // also tears down its inherited TCP connections so the remote `wsmprovhost.exe`
+        // is reaped by WinRM's idle timeout.
+        let server_for_log = server.clone();
+        let child_pid: std::sync::Arc<std::sync::Mutex<Option<u32>>> =
+            std::sync::Arc::new(std::sync::Mutex::new(None));
+        let child_pid_clone = std::sync::Arc::clone(&child_pid);
+        let blocking = tokio::task::spawn_blocking(move || {
             use std::io::Write;
 
             let mut cmd = Command::new(powershell_exe_path());
@@ -1606,6 +1680,11 @@ try {
                 .spawn()
                 .map_err(|e| std::io::Error::other(format!("Failed to spawn PowerShell: {}", e)))?;
 
+            // Publish the PID so the timeout handler can kill us if we hang.
+            if let Ok(mut guard) = child_pid_clone.lock() {
+                *guard = Some(child.id());
+            }
+
             {
                 let mut stdin = child
                     .stdin
@@ -1615,10 +1694,28 @@ try {
             }
 
             child.wait_with_output()
-        })
-        .await
-        .map_err(|e| format!("Task execution failed: {}", e))?
-        .map_err(|e| format!("PowerShell execution failed: {}", e))?;
+        });
+
+        let timeout = std::time::Duration::from_secs(REMOTE_PS_TIMEOUT_SECS);
+        let output = match tokio::time::timeout(timeout, blocking).await {
+            Ok(join_result) => join_result
+                .map_err(|e| format!("Task execution failed: {}", e))?
+                .map_err(|e| format!("PowerShell execution failed: {}", e))?,
+            Err(_) => {
+                let pid = child_pid.lock().ok().and_then(|g| *g);
+                if let Some(pid) = pid {
+                    kill_orphan_process(pid);
+                }
+                crate::logger::log_error(&format!(
+                    "PowerShell remote execution exceeded {}s timeout for server '{}' (pid={:?})",
+                    REMOTE_PS_TIMEOUT_SECS, server_for_log, pid
+                ));
+                return Err(format!(
+                    "Remote PowerShell timed out after {} seconds (server: {}). The target may be slow or unreachable.",
+                    REMOTE_PS_TIMEOUT_SECS, server_for_log
+                ));
+            }
+        };
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);

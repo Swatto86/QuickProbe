@@ -14,7 +14,7 @@
             qp_server_order: [],
             qp_group_order: [],
             qp_focused_group: null,
-            qp_host_view_mode: 'cards',
+            qp_host_view_mode: 'table',
             qp_hosts_changed: null,
         });
         let settingsBundle = settingsDefaultBundle();
@@ -43,7 +43,7 @@
         let openGroupRenameDialog = null;
         let openErrorDialog = null;
         let openHostPreview = null;
-        let hostViewMode = 'cards';
+        let hostViewMode = 'table';
         let reorderMode = false;
         let focusedGroup = null;
         let settings = defaultSettings();
@@ -232,7 +232,7 @@
                 qp_server_order: settingsBundle.qp_server_order || [],
                 qp_group_order: settingsBundle.qp_group_order || [],
                 qp_focused_group: settingsBundle.qp_focused_group || null,
-                qp_host_view_mode: settingsBundle.qp_host_view_mode || 'cards',
+                qp_host_view_mode: settingsBundle.qp_host_view_mode || 'table',
                 qp_hosts_changed: settingsBundle.qp_hosts_changed || null
             };
         }
