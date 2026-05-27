@@ -310,7 +310,7 @@ mod tests {
         let session = MockRemoteSession::server2022("SERVER01".to_string());
         let services = session.get_services(None).await.unwrap();
 
-        assert!(services.len() > 0);
+        assert!(!services.is_empty());
         assert!(services.iter().any(|s| s.name == "WinRM"));
     }
 
