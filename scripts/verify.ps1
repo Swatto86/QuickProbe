@@ -52,8 +52,8 @@ try {
 
     # ── 2. Lint / Static Analysis ─────────────────────────────────────
     Write-Section "2/5 — Lint (Clippy)"
-    Invoke-Step "cargo clippy --lib -D warnings" {
-        cargo clippy --lib --manifest-path src-tauri/Cargo.toml -- -D warnings
+    Invoke-Step "cargo clippy --all-targets -D warnings" {
+        cargo clippy --all-targets --manifest-path src-tauri/Cargo.toml -- -D warnings
     }
 
     # ── 3. Tests ──────────────────────────────────────────────────────

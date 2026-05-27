@@ -314,8 +314,8 @@ mod tests {
         let temp_dir = tempdir().expect("temp dir created");
         let db_path = temp_dir.path().join(DB_FILE_NAME);
 
-        let mut conn = open_connection(&db_path).expect("opened temp db");
-        init_schema(&mut conn).expect("initialized schema");
+        let conn = open_connection(&db_path).expect("opened temp db");
+        init_schema(&conn).expect("initialized schema");
 
         let mut stmt = conn
             .prepare(

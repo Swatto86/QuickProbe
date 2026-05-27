@@ -3,6 +3,7 @@
 use quickprobe::backup::{ModeDetails, RuntimeModeInfo};
 use quickprobe::updater::{self, UpdateInfo};
 use quickprobe::{self, db};
+#[cfg(debug_assertions)]
 use std::path::PathBuf;
 
 use super::types::*;
