@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.3] - 2026-05-27
+
 ### Fixed
 - **Default Dashboard View "Table" was silently reverted to "Cards" on save** — `normalize_host_view_mode` only accepted `cards`/`groups`, so selecting Table in Options → Default Dashboard View would persist as "cards" via `settings_set_all`. The validator now accepts `table` correctly; new installs default to Table view (cards/groups remain available from the dashboard view switcher and Options).
 - **Remote PowerShell could hang indefinitely on unreachable targets** — `execute_remote` and `validate_connectivity` now enforce hard timeouts (`REMOTE_PS_TIMEOUT_SECS` = 120 s, `CREDENTIAL_VALIDATION_TIMEOUT_SECS` = 10 s). On timeout, the orphan local `powershell.exe` is killed via `taskkill /F /T /PID`, preventing tokio blocking-pool exhaustion when many hosts are down.
@@ -80,7 +82,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - WinRM session cleanup (explicit PSSession management)
 - Credential Manager DPAPI storage
 
-[Unreleased]: https://github.com/Swatto86/QuickProbe/compare/v2.1.1...HEAD
+[Unreleased]: https://github.com/Swatto86/QuickProbe/compare/v2.1.3...HEAD
+[2.1.3]: https://github.com/Swatto86/QuickProbe/releases/tag/v2.1.3
 [2.1.1]: https://github.com/Swatto86/QuickProbe/releases/tag/v2.1.1
 [2.1.0]: https://github.com/Swatto86/QuickProbe/releases/tag/v2.1.0
 [2.0.4]: https://github.com/Swatto86/QuickProbe/releases/tag/v2.0.4
