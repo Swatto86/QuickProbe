@@ -22,7 +22,7 @@ one-click RDP, service/process management, and encrypted backup/restore — all 
 | **Login Mode** | Either "domain" (default — full `PrincipalContext` validation against a domain controller) or "local" (format-only validation, no DC required). Tracked in the KV store via `qp_login_mode`. |
 | **Backup Payload** | A schema-versioned, AES-256-encrypted ZIP containing hosts, KV settings, and runtime mode metadata. |
 | **KV Store** | SQLite-backed key-value persistence for dashboard settings, server order, and cached state. |
-| **Dashboard View Mode** | One of `cards`, `groups`, or `table`. Persisted as `qp_host_view_mode` in the KV store and mirrored in `localStorage` for cross-window sync. Configurable from Options → Default Dashboard View and from the dashboard header view switcher. Table view supports drag-resizable columns (persisted to `qp_table_col_widths`) and sortable columns (persisted to `qp_table_sort`). |
+| **Dashboard View Mode** | One of `cards`, `groups`, or `table`. **Default: `table`** (for new installs; existing users keep their saved preference). Persisted as `qp_host_view_mode` in the KV store and mirrored in `localStorage` for cross-window sync. Configurable from Options → Default Dashboard View and from the dashboard header view switcher. Table view supports drag-resizable columns (persisted to `qp_table_col_widths`), drag-reorderable columns (`qp_table_col_order`), and sortable columns (`qp_table_sort`). Normalisation enforced server-side by `normalize_host_view_mode` in `commands/helpers.rs`. |
 
 ---
 
@@ -221,7 +221,7 @@ QuickProbe/
 
 2. **No `unwrap()` in production paths.** All error cases must be handled explicitly. `unwrap()` is permitted only inside `#[cfg(test)]` blocks.
 
-3. **Explicit WinRM session cleanup.** Every `Invoke-Command` creates an explicit `PSSession` torn down in a `finally` block via `Remove-PSSession`. No bare `Invoke-Command -ComputerName`.
+3. **Explicit WinRM session cleanup.** Every `Invoke-Command` creates an explicit `PSSession` torn down in a `finally` block via `Remove-PSSession`. No bare `Invoke-Command -ComputerName`. Cleanup failures are surfaced on stderr (`Console.Error.WriteLine`), not silently swallowed, so leaked `wsmprovhost.exe` can be diagnosed.
 
 4. **No connectivity pre-checks on the heartbeat path.** `Test-WSMan` is reserved for user-initiated actions only.
 
@@ -229,7 +229,7 @@ QuickProbe/
 
 6. **Heartbeat interval is 120 seconds.** Never reduce below 60 seconds without considering session load on target servers.
 
-7. **Credentials never appear in logs, database, or error messages.** Only hashed/masked references are permitted.
+7. **Credentials never appear in logs, database, error messages, or command-line arguments.** Only hashed/masked references are permitted. Passwords are sent to PowerShell via stdin payloads or to PowerShell cmdlets (`New-SmbMapping`) that bind parameters internally; the only exception is `cmdkey /pass:` in `launch_remote_registry` (no stdin support), which is mitigated by auto-deletion 15 seconds after launch.
 
 8. **`core/` must remain platform-agnostic.** No Windows APIs, no `std::os::windows`, no `platform::` imports.
 
@@ -238,3 +238,7 @@ QuickProbe/
 10. **Backups are always AES-256 encrypted.** Plaintext export is not supported.
 
 11. **Local mode skips domain validation only.** `login_local_mode` uses `validate_credentials_basic` (format check). Credentials are still stored in DPAPI and `execute_remote()` still uses `New-PSSession -Credential`. AD-dependent features (Scan AD) are disabled in the UI when `get_login_mode` returns `"local"`.
+
+12. **Every remote-execution code path has a hard timeout.** `execute_remote` and `validate_connectivity` (WinRM) use `REMOTE_PS_TIMEOUT_SECS` (120 s) / `CREDENTIAL_VALIDATION_TIMEOUT_SECS` (10 s); `LinuxRemoteSession::exec` and `exec_with_pty` use `REMOTE_SSH_TIMEOUT_SECS` (120 s); `reg.exe` calls in `launch_remote_registry` use `REG_QUERY_TIMEOUT_SECS` (10 s) per attempt. On timeout, orphan local processes are killed via `taskkill /F /T /PID` (Windows) or `kill -9` (other platforms). No new spawned-blocking call may be added without one.
+
+13. **`normalize_host_view_mode` is the canonical validator for `qp_host_view_mode`.** Accepts `cards`, `groups`, or `table` (case-insensitive); rejects unknown values to the current default (`table`). Frontend pickers must offer exactly these three options to avoid silent reversion on save.

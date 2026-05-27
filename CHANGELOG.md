@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Default Dashboard View "Table" was silently reverted to "Cards" on save** — `normalize_host_view_mode` only accepted `cards`/`groups`, so selecting Table in Options → Default Dashboard View would persist as "cards" via `settings_set_all`. The validator now accepts `table` correctly; new installs default to Table view (cards/groups remain available from the dashboard view switcher and Options).
+- **Remote PowerShell could hang indefinitely on unreachable targets** — `execute_remote` and `validate_connectivity` now enforce hard timeouts (`REMOTE_PS_TIMEOUT_SECS` = 120 s, `CREDENTIAL_VALIDATION_TIMEOUT_SECS` = 10 s). On timeout, the orphan local `powershell.exe` is killed via `taskkill /F /T /PID`, preventing tokio blocking-pool exhaustion when many hosts are down.
+- **SSH command execution could hang indefinitely** — `LinuxRemoteSession::exec` and `exec_with_pty` now enforce `REMOTE_SSH_TIMEOUT_SECS` (120 s) via `tokio::time::timeout`.
+- **`reg.exe query` in `launch_remote_registry` could hang for minutes** — each of the three connectivity attempts is now bounded by `REG_QUERY_TIMEOUT_SECS` (10 s) via `tokio::time::timeout`, with the retry sleep moved off the OS thread to `tokio::time::sleep`.
+- **Password leaked to `net use` command line on Explore C$** — replaced the `net use \\\\server\\C$ <password> /user:` call with a stdin-fed PowerShell script that calls `New-SmbMapping`, so the password is never visible to other local processes via `Win32_Process.CommandLine`.
+- **`cmdkey /pass:` exposure in Remote Registry shortened** — credentials are now cached via a stdin-piped PowerShell wrapper (briefly on `cmdkey.exe`'s command line, unavoidable as `cmdkey` has no stdin password mode) and **deleted via `cmdkey /delete:` 15 seconds after regedit launches** (and immediately if regedit fails to spawn) so the cached credential does not persist in the user profile.
+- **`Remove-PSSession` failures were silently swallowed** — replaced `-ErrorAction SilentlyContinue` with an explicit try/catch that surfaces cleanup errors on stderr, so leaked `wsmprovhost.exe` processes can be correlated with their cause.
+- **Credential Manager could silently drop the last byte of a malformed password blob** — `WindowsCredentialManager::retrieve` now rejects any blob with an odd byte length (which would otherwise truncate via `chunks_exact(2)`) rather than returning a silently-corrupted password.
+
+### Changed
+- **Default Dashboard View is now Table** for new installs. Existing users keep their saved preference. Cards and Groups remain available from the header view switcher and Options.
+
+### Added
+- `REMOTE_PS_TIMEOUT_SECS`, `REMOTE_SSH_TIMEOUT_SECS`, `REG_QUERY_TIMEOUT_SECS` constants documenting the hard ceilings on remote execution time
+- Unit test `settings_set_all_accepts_table_view_mode` covering the previously-broken `table` round-trip
+
 ## [2.1.1] - 2026-04-16
 
 ### Fixed
@@ -63,6 +80,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - WinRM session cleanup (explicit PSSession management)
 - Credential Manager DPAPI storage
 
-[Unreleased]: https://github.com/Swatto86/QuickProbe/compare/v2.1.0...HEAD
+[Unreleased]: https://github.com/Swatto86/QuickProbe/compare/v2.1.1...HEAD
+[2.1.1]: https://github.com/Swatto86/QuickProbe/releases/tag/v2.1.1
 [2.1.0]: https://github.com/Swatto86/QuickProbe/releases/tag/v2.1.0
 [2.0.4]: https://github.com/Swatto86/QuickProbe/releases/tag/v2.0.4

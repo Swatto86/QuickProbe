@@ -58,6 +58,35 @@ pub fn powershell_exe_path() -> std::path::PathBuf {
 ///   But prevents indefinite hangs on unreachable hosts.
 pub const CREDENTIAL_VALIDATION_TIMEOUT_SECS: u64 = 10;
 
+/// Maximum wall-clock time a single remote PowerShell `execute_remote` call may take
+/// before the local PowerShell child is killed and the caller receives a timeout error.
+///
+/// **Rationale**: 120 seconds is:
+/// - Generous enough for the full system-health probe (which does a 2-second
+///   Get-Process sample plus several `Get-CimInstance` calls) on slow servers
+/// - Short enough that an unreachable host cannot hang a UI-initiated probe
+///   indefinitely, which previously could exhaust the tokio blocking pool
+///
+/// Backend-level timeout. UI-level probe timeouts in `qp_settings.probeTimeoutSeconds`
+/// remain authoritative for the orchestrator; this constant is the *hard ceiling*.
+pub const REMOTE_PS_TIMEOUT_SECS: u64 = 120;
+
+/// Maximum wall-clock time a single SSH `exec` call may take before the
+/// underlying TCP stream is dropped and the caller receives a timeout error.
+///
+/// **Rationale**: same as `REMOTE_PS_TIMEOUT_SECS`. SSH probes are typically
+/// faster than WinRM but the same upper bound prevents indefinite hangs.
+pub const REMOTE_SSH_TIMEOUT_SECS: u64 = 120;
+
+/// Maximum wall-clock time for a `reg.exe query \\server\HKLM` reachability test
+/// used by `launch_remote_registry`. Each retry is bounded by this timeout, so
+/// the overall budget is `attempts × REG_QUERY_TIMEOUT_SECS + back-off sleeps`.
+///
+/// **Rationale**: 10 seconds is enough for a healthy remote registry on a slow
+/// LAN, but short enough that 3 retries × 10s + 1.5s × 2 sleeps = 33s worst case
+/// (vs. the previous unbounded OS TCP timeout which could take minutes).
+pub const REG_QUERY_TIMEOUT_SECS: u64 = 10;
+
 /// TCP connection timeout for reachability probes (milliseconds)
 ///
 /// **Rationale**: 1200ms (1.2 seconds) is:

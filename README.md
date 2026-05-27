@@ -50,9 +50,9 @@ If your machine is **not joined to a domain** (e.g. a Hyper-V lab environment), 
 
 The dashboard supports three view modes, selectable via the **Cards / Groups / Table** buttons in the header (or set the default in **Options → Default Dashboard View**):
 
+- **Table** *(default)* — compact spreadsheet-style grid with sortable, drag-resizable, drag-reorderable columns — useful for seeing many servers at once. Column widths, order, and sort are remembered per user. The leftmost column (Actions by default) stays pinned while scrolling horizontally.
 - **Cards** — rich per-server cards with full health details and probe status.
-- **Groups** — cards organised by group, click a group to focus.
-- **Table** — compact spreadsheet-style grid with sortable, drag-resizable columns — useful for seeing many servers at once. Column widths and sort are remembered per user.
+- **Groups** — cards organised by group; click a group to focus.
 
 Each server card has two action rows:
 
@@ -159,10 +159,12 @@ ui/                     # Frontend
 
 QuickProbe is designed to be safe against remote targets, even domain controllers:
 
-- **Explicit session cleanup** — Every `Invoke-Command` creates an explicit `PSSession` that is torn down in a `finally` block via `Remove-PSSession`. This prevents `wsmprovhost.exe` accumulation on target servers.
+- **Explicit session cleanup** — Every `Invoke-Command` creates an explicit `PSSession` that is torn down in a `finally` block via `Remove-PSSession`. Cleanup failures are surfaced on stderr (not silently swallowed) so leaked `wsmprovhost.exe` processes can be correlated with their cause.
+- **Hard execution timeouts** — Each remote PowerShell call is bounded by `REMOTE_PS_TIMEOUT_SECS` (120 s); SSH calls by `REMOTE_SSH_TIMEOUT_SECS` (120 s); `reg.exe` connectivity tests by `REG_QUERY_TIMEOUT_SECS` (10 s). On timeout the local child process is killed via `taskkill /F /T`, so an unreachable target cannot hang the tokio blocking pool or stall the UI.
 - **No pre-flight connectivity check on probes** — The `Test-WSMan` validation is only used for user-initiated actions (adding a host, testing credentials), not on the recurring heartbeat path. This halves the per-probe session count.
-- **Session caching** — `WindowsRemoteSession` handles are cached per-server with a 5-minute TTL. The cache is invalidated on credential or host config changes.
+- **Session caching** — `WindowsRemoteSession` handles are cached per-server with a 5-minute TTL. The cache is invalidated on credential or host config changes. (The handle holds credentials + server name only; every `execute_remote` call still creates a fresh `New-PSSession`.)
 - **Throttled heartbeat** — The dashboard polls every 120 seconds (with jitter) and enforces a 60-second minimum between quick probes to the same host. A circuit-breaker pattern backs off failing servers exponentially.
+- **No passwords on command lines** — Credentials are sent to PowerShell via stdin (probes), `New-SmbMapping` (Explore C$), or via PowerShell-wrapped `cmdkey` (Remote Registry, with auto-cleanup 15 s after launch). Passwords never appear in `Win32_Process.CommandLine`.
 
 ## Security
 

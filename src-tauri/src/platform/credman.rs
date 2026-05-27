@@ -163,11 +163,20 @@ impl WindowsCredentialManager {
                         ));
                     };
 
-                    // Extract password from credential blob (stored as UTF-16)
-                    let password_bytes = std::slice::from_raw_parts(
-                        cred.CredentialBlob,
-                        cred.CredentialBlobSize as usize,
-                    );
+                    // Extract password from credential blob (stored as UTF-16).
+                    // Sanity-check the blob size before slicing so we never read past
+                    // the buffer if a credential was written by another tool with an
+                    // unexpected encoding (DPAPI doesn't enforce length parity).
+                    let blob_len = cred.CredentialBlobSize as usize;
+                    if blob_len % 2 != 0 {
+                        CredFree(pcred as *const _);
+                        return Err(CredentialError::Platform(format!(
+                            "Credential blob for profile '{}' has odd byte length ({}); not a valid UTF-16 password.",
+                            profile.as_str(),
+                            blob_len
+                        )));
+                    }
+                    let password_bytes = std::slice::from_raw_parts(cred.CredentialBlob, blob_len);
 
                     // Convert byte pairs to u16 values (UTF-16 characters)
                     let password_wide: Vec<u16> = password_bytes
