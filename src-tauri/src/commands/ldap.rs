@@ -259,7 +259,7 @@ async fn ldap_search_windows_servers(
 
     ldap.unbind().await.ok();
 
-    computers.sort_by(|a, b| a.fqdn.to_lowercase().cmp(&b.fqdn.to_lowercase()));
+    computers.sort_by_key(|a| a.fqdn.to_lowercase());
     if computers.is_empty() {
         let scope = if include_windows_clients {
             "Windows hosts"
