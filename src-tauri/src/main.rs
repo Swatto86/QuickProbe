@@ -345,11 +345,9 @@ fn main() {
                 }
                 _ => {}
             },
-            WindowEvent::Resized(_size) => {
-                if window.is_minimized().unwrap_or(false) {
-                    let _ = window.hide();
-                    let _ = window.set_skip_taskbar(true);
-                }
+            WindowEvent::Resized(_size) if window.is_minimized().unwrap_or(false) => {
+                let _ = window.hide();
+                let _ = window.set_skip_taskbar(true);
             }
             _ => {}
         })
