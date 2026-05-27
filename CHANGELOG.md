@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.4] - 2026-05-27
+
+### Fixed
+- **Installed app showed unstyled white windows** — `tauri.conf.json` had an empty `beforeBuildCommand`, so `tauri build` bundled the `ui/` folder without running `npm run build:css` first. Because `ui/styles.css` is a gitignored Tailwind/DaisyUI build artifact, the NSIS installer shipped without a stylesheet and every window rendered without CSS. `beforeBuildCommand` (and `beforeDevCommand`) now invoke `npm run build:css`, so the bundle is always self-contained.
+
 ## [2.1.3] - 2026-05-27
 
 ### Fixed
