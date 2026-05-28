@@ -409,7 +409,7 @@ try {
         format!(
             "Failed to parse processes response: {} - output: {}",
             e,
-            &trimmed[..trimmed.len().min(200)]
+            trimmed.chars().take(200).collect::<String>()
         )
     })?;
 

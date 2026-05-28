@@ -12,6 +12,7 @@ use zip::{write::SimpleFileOptions, AesMode, CompressionMethod, ZipArchive, ZipW
 
 use super::helpers::*;
 use super::hosts::*;
+use super::state::host_mutation_lock;
 use super::system::runtime_mode_info_local;
 use super::types::*;
 
@@ -68,6 +69,11 @@ pub(crate) async fn import_backup_encrypted(
 
     // Validate password strength
     validate_backup_password(&password)?;
+
+    // A restore is a full host-inventory rewrite; serialize it with other host
+    // mutations (e.g. a concurrent scan_domain) so neither clobbers the other.
+    // The guard is held across the blocking restore task and released on return.
+    let _mutation_guard = host_mutation_lock().lock().await;
 
     tokio::task::spawn_blocking(move || {
         crate::logger::log_info(&format!(

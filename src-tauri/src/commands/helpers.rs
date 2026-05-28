@@ -95,7 +95,8 @@ pub(crate) fn save_app_settings(settings: &AppSettings) -> Result<(), String> {
 
 pub(crate) fn default_qp_settings_json() -> String {
     serde_json::json!({
-        "probeTimeoutSeconds": 60,
+        "probeTimeoutSeconds": 90,
+        "quickProbeTimeoutSeconds": 30,
         "infoTimeoutMs": 3500,
         "warningTimeoutMs": 4500,
         "errorTimeoutMs": 0,
@@ -156,7 +157,8 @@ pub(crate) fn bump_hosts_changed_flag() -> Result<(), String> {
 pub(crate) fn default_settings_bundle() -> SettingsBundle {
     let qp_settings = serde_json::from_str(&default_qp_settings_json()).unwrap_or_else(|_| {
         serde_json::json!({
-            "probeTimeoutSeconds": 60,
+            "probeTimeoutSeconds": 90,
+            "quickProbeTimeoutSeconds": 30,
             "infoTimeoutMs": 3500,
             "warningTimeoutMs": 4500,
             "errorTimeoutMs": 0,
