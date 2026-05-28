@@ -19,6 +19,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Verify tag matches package version
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        run: |
+          $tag = $env:GITHUB_REF -replace '^refs/tags/v?', ''
+          $cargo = (Select-String -Path 'src-tauri/Cargo.toml' -Pattern '^version\s*=\s*"(.+?)"' | Select-Object -First 1).Matches.Groups[1].Value
+          $tauri = (Get-Content 'src-tauri/tauri.conf.json' -Raw | ConvertFrom-Json).version
+          Write-Host "tag=$tag  Cargo.toml=$cargo  tauri.conf.json=$tauri"
+          if ($tag -ne $cargo -or $tag -ne $tauri) {
+            Write-Error "Release version mismatch: tag '$tag' must equal Cargo.toml ('$cargo') and tauri.conf.json ('$tauri'). Bump both source versions to match the tag before tagging (see docs/RELEASING.md)."
+            exit 1
+          }
+          Write-Host "Version check passed: $tag"
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@1.95.0
         with:
