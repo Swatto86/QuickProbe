@@ -1573,6 +1573,79 @@ try {
         })
     }
 
+    /// Spawn the remote-PowerShell driver process once and return its completed
+    /// `Output`. Enforces `REMOTE_PS_TIMEOUT_SECS`; on timeout the local child is
+    /// killed (tearing down its inherited TCP connections so the remote
+    /// `wsmprovhost.exe` is reaped by WinRM's idle timeout) and an `Err` is
+    /// returned. Timeouts are surfaced as a hard error and never retried, because
+    /// at that point the remote command may already be executing.
+    async fn run_powershell_once(
+        payload_json: String,
+        ps_script: &'static str,
+        server_for_log: &str,
+    ) -> Result<std::process::Output, String> {
+        let server_for_log = server_for_log.to_string();
+        let child_pid: std::sync::Arc<std::sync::Mutex<Option<u32>>> =
+            std::sync::Arc::new(std::sync::Mutex::new(None));
+        let child_pid_clone = std::sync::Arc::clone(&child_pid);
+        let blocking = tokio::task::spawn_blocking(move || {
+            use std::io::Write;
+
+            let mut cmd = Command::new(powershell_exe_path());
+            cmd.arg("-NoProfile")
+                .arg("-NonInteractive")
+                .arg("-Command")
+                .arg(ps_script)
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped());
+
+            // Hide the PowerShell window on Windows
+            #[cfg(windows)]
+            cmd.creation_flags(CREATE_NO_WINDOW);
+
+            let mut child = cmd
+                .spawn()
+                .map_err(|e| std::io::Error::other(format!("Failed to spawn PowerShell: {}", e)))?;
+
+            // Publish the PID so the timeout handler can kill us if we hang.
+            if let Ok(mut guard) = child_pid_clone.lock() {
+                *guard = Some(child.id());
+            }
+
+            {
+                let mut stdin = child
+                    .stdin
+                    .take()
+                    .ok_or_else(|| std::io::Error::other("Failed to open stdin"))?;
+                stdin.write_all(payload_json.as_bytes())?;
+            }
+
+            child.wait_with_output()
+        });
+
+        let timeout = std::time::Duration::from_secs(REMOTE_PS_TIMEOUT_SECS);
+        match tokio::time::timeout(timeout, blocking).await {
+            Ok(join_result) => join_result
+                .map_err(|e| format!("Task execution failed: {}", e))?
+                .map_err(|e| format!("PowerShell execution failed: {}", e)),
+            Err(_) => {
+                let pid = child_pid.lock().ok().and_then(|g| *g);
+                if let Some(pid) = pid {
+                    kill_orphan_process(pid);
+                }
+                crate::logger::log_error(&format!(
+                    "PowerShell remote execution exceeded {}s timeout for server '{}' (pid={:?})",
+                    REMOTE_PS_TIMEOUT_SECS, server_for_log, pid
+                ));
+                Err(format!(
+                    "Remote PowerShell timed out after {} seconds (server: {}). The target may be slow or unreachable.",
+                    REMOTE_PS_TIMEOUT_SECS, server_for_log
+                ))
+            }
+        }
+    }
+
     /// Execute a PowerShell command on the remote server
     ///
     /// Internal method used by trait implementations.
@@ -1627,9 +1700,23 @@ try {
     # Without this, Invoke-Command -ComputerName creates implicit sessions that rely
     # on WinRM idle timeout (default 2 hours) for cleanup, causing wsmprovhost.exe
     # accumulation and memory leaks on the remote server.
-    $session = New-PSSession -ComputerName $server -Credential $cred -ErrorAction Stop
+    #
+    # Connection stage: a failure here means the remote command never ran, so the
+    # Rust caller may safely retry on transient errors. Signalled via exit code 2.
+    $connectError = $null
+    try {
+        $session = New-PSSession -ComputerName $server -Credential $cred -ErrorAction Stop
+    } catch {
+        $connectError = $_.Exception.Message
+    }
+    if ($null -eq $session) {
+        [Console]::Error.WriteLine("QP_CONNECT_FAILED: " + $connectError)
+        exit 2
+    }
 
-    # Execute inside the remote session by passing the decoded script as an argument to avoid inline quoting issues
+    # Execution stage (exit code 1 on failure — NEVER retried, the command may
+    # have side effects). Execute inside the remote session by passing the decoded
+    # script as an argument to avoid inline quoting issues.
     Invoke-Command -Session $session -ErrorAction Stop -ScriptBlock {
         param($scriptText)
         $sb = [ScriptBlock]::Create($scriptText)
@@ -1651,73 +1738,21 @@ try {
     }
 }"#;
 
-        // Execute in background to avoid blocking. A hard timeout is enforced here so a
-        // slow/unreachable target cannot hang the tokio blocking pool indefinitely; on
-        // timeout we kill the local PowerShell child via the shared PID handle, which
-        // also tears down its inherited TCP connections so the remote `wsmprovhost.exe`
-        // is reaped by WinRM's idle timeout.
-        let server_for_log = server.clone();
-        let child_pid: std::sync::Arc<std::sync::Mutex<Option<u32>>> =
-            std::sync::Arc::new(std::sync::Mutex::new(None));
-        let child_pid_clone = std::sync::Arc::clone(&child_pid);
-        let blocking = tokio::task::spawn_blocking(move || {
-            use std::io::Write;
+        // Retry ONLY the connection stage (exit code 2) on transient errors. The
+        // remote command runs at most once per successful connection, so a
+        // non-idempotent action (restart/shutdown/exec) is never duplicated.
+        // Execution-stage failures (exit 1) and timeouts are returned immediately.
+        const MAX_ATTEMPTS: u32 = 3;
+        let mut attempt: u32 = 0;
+        loop {
+            attempt += 1;
+            let output =
+                Self::run_powershell_once(payload_json.clone(), ps_script, &server).await?;
 
-            let mut cmd = Command::new(powershell_exe_path());
-            cmd.arg("-NoProfile")
-                .arg("-NonInteractive")
-                .arg("-Command")
-                .arg(ps_script)
-                .stdin(std::process::Stdio::piped())
-                .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::piped());
-
-            // Hide the PowerShell window on Windows
-            #[cfg(windows)]
-            cmd.creation_flags(CREATE_NO_WINDOW);
-
-            let mut child = cmd
-                .spawn()
-                .map_err(|e| std::io::Error::other(format!("Failed to spawn PowerShell: {}", e)))?;
-
-            // Publish the PID so the timeout handler can kill us if we hang.
-            if let Ok(mut guard) = child_pid_clone.lock() {
-                *guard = Some(child.id());
+            if output.status.success() {
+                return Ok(String::from_utf8_lossy(&output.stdout).to_string());
             }
 
-            {
-                let mut stdin = child
-                    .stdin
-                    .take()
-                    .ok_or_else(|| std::io::Error::other("Failed to open stdin"))?;
-                stdin.write_all(payload_json.as_bytes())?;
-            }
-
-            child.wait_with_output()
-        });
-
-        let timeout = std::time::Duration::from_secs(REMOTE_PS_TIMEOUT_SECS);
-        let output = match tokio::time::timeout(timeout, blocking).await {
-            Ok(join_result) => join_result
-                .map_err(|e| format!("Task execution failed: {}", e))?
-                .map_err(|e| format!("PowerShell execution failed: {}", e))?,
-            Err(_) => {
-                let pid = child_pid.lock().ok().and_then(|g| *g);
-                if let Some(pid) = pid {
-                    kill_orphan_process(pid);
-                }
-                crate::logger::log_error(&format!(
-                    "PowerShell remote execution exceeded {}s timeout for server '{}' (pid={:?})",
-                    REMOTE_PS_TIMEOUT_SECS, server_for_log, pid
-                ));
-                return Err(format!(
-                    "Remote PowerShell timed out after {} seconds (server: {}). The target may be slow or unreachable.",
-                    REMOTE_PS_TIMEOUT_SECS, server_for_log
-                ));
-            }
-        };
-
-        if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             let stdout = String::from_utf8_lossy(&output.stdout);
             let raw_error = if !stderr.is_empty() {
@@ -1728,21 +1763,34 @@ try {
                 "Unknown error".to_string()
             };
 
-            // Redact password from any echoed error output
+            // Redact password from any echoed error output, then drop the staging
+            // marker before the message reaches logs or the UI.
             let redacted_error = crate::utils::redact_secret(&raw_error, &password);
+            let display_error = redacted_error.replace("QP_CONNECT_FAILED: ", "");
+            let connect_stage = output.status.code() == Some(2);
 
-            // Log the full stderr for diagnostics
+            if connect_stage
+                && attempt < MAX_ATTEMPTS
+                && crate::utils::is_transient_error(&display_error)
+            {
+                crate::logger::log_warn(&format!(
+                    "PowerShell connect to '{}' hit a transient error (attempt {}/{}), retrying: {}",
+                    server,
+                    attempt,
+                    MAX_ATTEMPTS,
+                    display_error.trim()
+                ));
+                tokio::time::sleep(std::time::Duration::from_millis(500 * u64::from(attempt)))
+                    .await;
+                continue;
+            }
+
             crate::logger::log_error(&format!(
                 "PowerShell failed for server '{}': {}",
-                server, redacted_error
+                server, display_error
             ));
-
-            // Extract a cleaner error message
-            let error_msg = Self::simplify_error_message(&redacted_error);
-            return Err(error_msg);
+            return Err(Self::simplify_error_message(&display_error));
         }
-
-        Ok(String::from_utf8_lossy(&output.stdout).to_string())
     }
 
     #[cfg(debug_assertions)]

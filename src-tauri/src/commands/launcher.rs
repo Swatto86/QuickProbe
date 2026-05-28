@@ -64,6 +64,29 @@ pub(crate) fn validate_rdp_parameter(value: &str, param_name: &str) -> Result<()
     Ok(())
 }
 
+/// Reject characters that could break out of the `cmd /k <ssh ...>` command line
+/// used by `launch_ssh`. SSH hostnames and usernames have no legitimate need for
+/// shell/cmd metacharacters, so an allowlist closes the injection vector while
+/// permitting every character found in real hostnames/usernames.
+pub(crate) fn validate_ssh_launch_component(value: &str, what: &str) -> Result<(), String> {
+    if value.is_empty() {
+        return Err(format!("{} cannot be empty", what));
+    }
+    if value.len() > 256 {
+        return Err(format!("{} exceeds maximum length of 256 characters", what));
+    }
+    if !value
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | ':' | '@' | '\\'))
+    {
+        return Err(format!(
+            "Invalid {}: only letters, digits, and . - _ : @ \\ are allowed",
+            what
+        ));
+    }
+    Ok(())
+}
+
 /// Generates RDP file content (.rdp) with optimized settings for server management.
 pub(crate) fn build_rdp_content(host: &str, username: &str, domain: &str) -> String {
     let user_field = if domain.is_empty() {
@@ -265,6 +288,13 @@ pub(crate) async fn launch_ssh(server: String) -> Result<(), String> {
     } else {
         (server.to_string(), None)
     };
+
+    // Validate the components that flow into the `cmd /k ssh ...` command line
+    // to prevent cmd.exe metacharacter injection.
+    validate_ssh_launch_component(&host, "hostname")?;
+    if !username.is_empty() {
+        validate_ssh_launch_component(&username, "username")?;
+    }
 
     // Build SSH command
     let ssh_target = if username.is_empty() {

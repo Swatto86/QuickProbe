@@ -33,7 +33,11 @@ pub(crate) async fn remote_restart(server_name: String) -> Result<(), String> {
             .await
             .map_err(|e| format!("Failed to connect to {}: {}", server_name, e))?;
 
-        let restart_cmd = "sudo shutdown -r now";
+        // `-n` (non-interactive): if the account lacks password-less sudo, fail
+        // fast with a clear error instead of stalling on a hidden password
+        // prompt. `shutdown ... now` returns before sshd is torn down, so the
+        // synchronous call still reports success correctly on the happy path.
+        let restart_cmd = "sudo -n shutdown -r now";
 
         let result = session.execute_command(restart_cmd).await;
 
@@ -99,7 +103,9 @@ pub(crate) async fn remote_shutdown(server_name: String) -> Result<(), String> {
             .await
             .map_err(|e| format!("Failed to connect to {}: {}", server_name, e))?;
 
-        let shutdown_cmd = "sudo shutdown -h now";
+        // `-n` (non-interactive): see remote_restart — fail fast on missing
+        // password-less sudo rather than stalling on a hidden password prompt.
+        let shutdown_cmd = "sudo -n shutdown -h now";
 
         let result = session.execute_command(shutdown_cmd).await;
 
