@@ -10,7 +10,7 @@ use quickprobe::CredentialStore;
 
 use super::helpers::normalize_host_name;
 use super::hosts::*;
-use super::state::clear_session_cache;
+use super::state::{clear_session_cache, host_mutation_lock};
 use super::types::*;
 
 // ---------------------------------------------------------------------------
@@ -72,6 +72,11 @@ pub(crate) async fn scan_domain(
         .filter_map(|entry| normalize_host_name(&entry.fqdn).ok())
         .map(|n| n.to_lowercase())
         .collect();
+
+    // Hold the host-mutation lock only across the read-modify-write reconcile
+    // (NOT the slow LDAP search above), so a concurrent host edit cannot land
+    // between the read and the persist and get clobbered by the merged result.
+    let _mutation_guard = host_mutation_lock().lock().await;
 
     // Merge with existing hosts while preserving notes/services
     let existing = get_hosts().await?;

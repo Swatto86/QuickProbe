@@ -5,7 +5,7 @@ use rusqlite::TransactionBehavior;
 use std::time::SystemTime;
 
 use super::helpers::*;
-use super::state::{clear_session_cache, invalidate_session_cache};
+use super::state::{clear_session_cache, host_mutation_lock, invalidate_session_cache};
 use super::types::*;
 
 // ---------------------------------------------------------------------------
@@ -245,6 +245,8 @@ pub(crate) async fn set_hosts(hosts: Vec<HostUpdate>) -> Result<(), String> {
     let start = SystemTime::now();
     crate::logger::log_info(&format!("set_hosts: {} host(s)", hosts.len()));
 
+    let _mutation_guard = host_mutation_lock().lock().await;
+
     for (i, host) in hosts.iter().enumerate() {
         let mut fields = Vec::new();
         if host.notes.is_some() {
@@ -294,6 +296,8 @@ pub(crate) async fn save_server_notes(server_name: String, notes: String) -> Res
         normalized_name,
         notes_clean.len()
     ));
+
+    let _mutation_guard = host_mutation_lock().lock().await;
 
     let conn = db::open_db().map_err(|e| format!("Failed to open database: {}", e))?;
 
@@ -353,6 +357,8 @@ pub(crate) async fn update_host(
     if normalized_name.is_empty() {
         return Err("Invalid server name".to_string());
     }
+
+    let _mutation_guard = host_mutation_lock().lock().await;
 
     let conn = db::open_db().map_err(|e| format!("Failed to open database: {}", e))?;
     db::init_schema(&conn).map_err(|e| format!("Failed to initialize database schema: {}", e))?;
@@ -432,6 +438,8 @@ pub(crate) async fn rename_group(old_group: String, new_group: String) -> Result
     if new_trim.is_empty() {
         return Err("New group name cannot be empty".to_string());
     }
+
+    let _mutation_guard = host_mutation_lock().lock().await;
 
     let conn = db::open_db().map_err(|e| format!("Failed to open database: {}", e))?;
     db::init_schema(&conn).map_err(|e| format!("Failed to initialize database schema: {}", e))?;

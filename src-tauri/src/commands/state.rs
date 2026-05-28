@@ -34,6 +34,52 @@ pub(crate) fn session_pool() -> &'static RwLock<HashMap<String, CachedSession>> 
     POOL.get_or_init(|| RwLock::new(HashMap::new()))
 }
 
+/// Serializes host-inventory mutations (`set_hosts`, `update_host`,
+/// `save_server_notes`, `rename_group`, `scan_domain`) so a read-modify-write
+/// reconcile — most notably `scan_domain`'s `get_hosts` → merge →
+/// `persist_hosts` — cannot interleave with a concurrent edit and silently lose
+/// the update. Every host-mutation command holds this for the duration of its
+/// read+write window.
+pub(crate) fn host_mutation_lock() -> &'static tokio::sync::Mutex<()> {
+    static LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+}
+
+/// Per-host locks that serialize Windows session creation. Without this, two
+/// concurrent probes of the same host both miss the cache and both build a
+/// `WindowsRemoteSession`; one is then discarded, leaving an orphan
+/// `wsmprovhost.exe` on the target. Different hosts still connect in parallel.
+fn connect_locks() -> &'static RwLock<HashMap<String, Arc<tokio::sync::Mutex<()>>>> {
+    static LOCKS: OnceLock<RwLock<HashMap<String, Arc<tokio::sync::Mutex<()>>>>> = OnceLock::new();
+    LOCKS.get_or_init(|| RwLock::new(HashMap::new()))
+}
+
+async fn host_connect_lock(cache_key: &str) -> Arc<tokio::sync::Mutex<()>> {
+    {
+        let map = connect_locks().read().await;
+        if let Some(lock) = map.get(cache_key) {
+            return Arc::clone(lock);
+        }
+    }
+    let mut map = connect_locks().write().await;
+    Arc::clone(
+        map.entry(cache_key.to_string())
+            .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(()))),
+    )
+}
+
+/// Return a non-expired cached Windows session for `cache_key`, if present.
+async fn cached_windows_session(cache_key: &str) -> Option<Arc<WindowsRemoteSession>> {
+    let pool = session_pool().read().await;
+    let cached = pool.get(cache_key)?;
+    let age = cached.created_at.elapsed().unwrap_or_default().as_secs();
+    if age < SESSION_CACHE_TTL_SECS {
+        Some(Arc::clone(&cached.session))
+    } else {
+        None
+    }
+}
+
 /// Remove a specific server from the session cache (e.g. after credential changes).
 pub(crate) async fn invalidate_session_cache(server_name: &str) {
     let key = server_name.to_ascii_lowercase();
@@ -274,22 +320,30 @@ pub(crate) async fn connect_remote_session(
     if !os_hint.eq_ignore_ascii_case("linux") {
         let cache_key = server_name.to_ascii_lowercase();
 
-        // Check cache (read lock – fast, non-exclusive)
-        {
-            let pool = session_pool().read().await;
-            if let Some(cached) = pool.get(&cache_key) {
-                let age = cached.created_at.elapsed().unwrap_or_default().as_secs();
-                if age < SESSION_CACHE_TTL_SECS {
-                    crate::logger::log_debug_verbose(&format!(
-                        "connect_remote_session: CACHE HIT '{}' (age {}s)",
-                        server_name, age
-                    ));
-                    return Ok(SessionKind::Windows(Arc::clone(&cached.session)));
-                }
-            }
+        // Fast path: cache hit under a shared read lock.
+        if let Some(session) = cached_windows_session(&cache_key).await {
+            crate::logger::log_debug_verbose(&format!(
+                "connect_remote_session: CACHE HIT '{}'",
+                server_name
+            ));
+            return Ok(SessionKind::Windows(session));
         }
 
-        // Cache miss or stale – create a new session
+        // Cache miss or stale. Serialize creation per host so concurrent probes
+        // of the same server don't each build (then discard) a WinRM session.
+        let connect_lock = host_connect_lock(&cache_key).await;
+        let _connect_guard = connect_lock.lock().await;
+
+        // Double-check: another task may have populated the cache while we were
+        // waiting for the per-host connect lock.
+        if let Some(session) = cached_windows_session(&cache_key).await {
+            crate::logger::log_debug_verbose(&format!(
+                "connect_remote_session: CACHE HIT after connect lock '{}'",
+                server_name
+            ));
+            return Ok(SessionKind::Windows(session));
+        }
+
         let server_clone = server_name.clone();
         let creds_clone = credentials.clone();
 
