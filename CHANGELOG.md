@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **SSH remote actions could hang on unreachable Linux hosts and leak blocking-pool threads** — `exec`/`exec_with_pty` used `TcpStream::connect`, which blocks for the OS default connect timeout (tens of seconds of SYN retransmits) on a filtered/unreachable host. Because the connect runs inside `spawn_blocking`, the outer `REMOTE_SSH_TIMEOUT_SECS` timeout fired but couldn't cancel the blocking thread, so it stayed occupied — exhausting the blocking pool when many hosts were down. SSH now uses an explicit per-attempt `connect_timeout` (`SSH_CONNECT_TIMEOUT_SECS`) so the thread is freed promptly.
+- **Transient SSH connection blips failed remote actions outright** — the connect/handshake/auth phase is now retried up to `SSH_CONNECT_MAX_ATTEMPTS` on transient errors (timeouts, connection reset, name-resolution hiccups). Only the connection setup is retried — the remote command itself still runs at most once, so non-idempotent actions (restart/shutdown/exec) are never duplicated. Non-transient failures (auth/permission) still fail fast.
+
+### Added
+- `SSH_CONNECT_TIMEOUT_SECS` and `SSH_CONNECT_MAX_ATTEMPTS` constants documenting the SSH connection-establishment bounds.
+
 ## [2.1.5] - 2026-05-28
 
 ### Fixed
