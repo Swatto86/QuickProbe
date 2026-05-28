@@ -3,7 +3,9 @@
 //! Provides a minimal SSH-based `RemoteSession` implementation so the Windows
 //! UI can probe Linux hosts without WinRM/PowerShell.
 
-use crate::constants::REMOTE_SSH_TIMEOUT_SECS;
+use crate::constants::{
+    REMOTE_SSH_TIMEOUT_SECS, SSH_CONNECT_MAX_ATTEMPTS, SSH_CONNECT_TIMEOUT_SECS,
+};
 use crate::core::session::{
     DiskInfo, MemoryInfo, NetAdapterInfo, OsInfo, ProcessInfo, RemoteSession, ServiceInfo,
     SessionOs, UptimeSnapshot,
@@ -11,8 +13,92 @@ use crate::core::session::{
 use crate::models::{Credentials, SecureString};
 use ssh2::Session;
 use std::io::Read;
-use std::net::TcpStream;
+use std::net::{TcpStream, ToSocketAddrs};
 use std::time::Duration;
+
+/// Open a TCP connection to `host:port` with an explicit per-attempt timeout.
+///
+/// `TcpStream::connect` uses the OS default connect timeout (tens of seconds of
+/// SYN retransmits) which, inside `spawn_blocking`, cannot be cancelled by the
+/// outer task timeout. Resolving to concrete `SocketAddr`s and using
+/// `connect_timeout` bounds the connect phase so the blocking thread is freed
+/// promptly when a host is unreachable.
+fn ssh_tcp_connect(host: &str, port: u16) -> Result<TcpStream, String> {
+    let connect_timeout = Duration::from_secs(SSH_CONNECT_TIMEOUT_SECS);
+    let addrs = (host, port)
+        .to_socket_addrs()
+        .map_err(|e| format!("SSH connect to {host}:{port} failed: name resolution error: {e}"))?;
+
+    let mut last_err: Option<String> = None;
+    for addr in addrs {
+        match TcpStream::connect_timeout(&addr, connect_timeout) {
+            Ok(tcp) => return Ok(tcp),
+            Err(e) => last_err = Some(e.to_string()),
+        }
+    }
+
+    Err(match last_err {
+        Some(e) => format!("SSH connect to {host}:{port} failed: {e}"),
+        None => format!("SSH connect to {host}:{port} failed: no addresses resolved"),
+    })
+}
+
+/// Establish a single authenticated SSH session (TCP connect → handshake →
+/// password auth), applying the given socket read/write timeouts.
+fn ssh_establish_session(
+    host: &str,
+    port: u16,
+    username: &str,
+    password: &str,
+    read_timeout: Duration,
+    write_timeout: Duration,
+) -> Result<Session, String> {
+    let tcp = ssh_tcp_connect(host, port)?;
+    tcp.set_read_timeout(Some(read_timeout)).ok();
+    tcp.set_write_timeout(Some(write_timeout)).ok();
+
+    let mut sess = Session::new().map_err(|e| format!("SSH session init failed: {e}"))?;
+    sess.set_tcp_stream(tcp);
+    sess.handshake()
+        .map_err(|e| format!("SSH handshake failed: {e}"))?;
+    sess.userauth_password(username, password)
+        .map_err(|e| format!("SSH authentication failed: {e}"))?;
+    if !sess.authenticated() {
+        return Err("SSH authentication failed".to_string());
+    }
+    Ok(sess)
+}
+
+/// Establish an authenticated SSH session, retrying the connect/handshake/auth
+/// phase on transient failures. Only the connection setup is retried — the
+/// caller runs the remote command afterwards exactly once, so this never risks
+/// duplicate command execution.
+fn ssh_establish_session_with_retry(
+    host: &str,
+    port: u16,
+    username: &str,
+    password: &str,
+    read_timeout: Duration,
+    write_timeout: Duration,
+) -> Result<Session, String> {
+    let mut attempt: u32 = 0;
+    loop {
+        attempt += 1;
+        match ssh_establish_session(host, port, username, password, read_timeout, write_timeout) {
+            Ok(sess) => return Ok(sess),
+            Err(e) => {
+                if attempt < SSH_CONNECT_MAX_ATTEMPTS && crate::utils::is_transient_error(&e) {
+                    crate::logger::log_debug(&format!(
+                        "ssh connect to {host}:{port} transient error (attempt {attempt}/{SSH_CONNECT_MAX_ATTEMPTS}), retrying: {e}"
+                    ));
+                    std::thread::sleep(Duration::from_millis(400 * u64::from(attempt)));
+                    continue;
+                }
+                return Err(e);
+            }
+        }
+    }
+}
 
 /// SSH-based remote session for probing Linux hosts.
 ///
@@ -74,21 +160,14 @@ impl LinuxRemoteSession {
         let host_for_log = host.clone();
 
         let blocking = tokio::task::spawn_blocking(move || {
-            let tcp = TcpStream::connect((host.as_str(), port))
-                .map_err(|e| format!("SSH connect to {}:{} failed: {}", host, port, e))?;
-            tcp.set_read_timeout(Some(Duration::from_secs(10))).ok();
-            tcp.set_write_timeout(Some(Duration::from_secs(10))).ok();
-
-            let mut sess = Session::new().map_err(|e| format!("SSH session init failed: {e}"))?;
-            sess.set_tcp_stream(tcp);
-            sess.handshake()
-                .map_err(|e| format!("SSH handshake failed: {e}"))?;
-
-            sess.userauth_password(&username, &password)
-                .map_err(|e| format!("SSH authentication failed: {e}"))?;
-            if !sess.authenticated() {
-                return Err("SSH authentication failed".to_string());
-            }
+            let sess = ssh_establish_session_with_retry(
+                &host,
+                port,
+                &username,
+                &password,
+                Duration::from_secs(10),
+                Duration::from_secs(10),
+            )?;
 
             let mut channel = sess
                 .channel_session()
@@ -363,21 +442,14 @@ impl LinuxRemoteSession {
         let host_for_log = host.clone();
 
         let blocking = tokio::task::spawn_blocking(move || {
-            let tcp = TcpStream::connect((host.as_str(), port))
-                .map_err(|e| format!("SSH connect to {}:{} failed: {}", host, port, e))?;
-            tcp.set_read_timeout(Some(Duration::from_secs(30))).ok();
-            tcp.set_write_timeout(Some(Duration::from_secs(10))).ok();
-
-            let mut sess = Session::new().map_err(|e| format!("SSH session init failed: {e}"))?;
-            sess.set_tcp_stream(tcp);
-            sess.handshake()
-                .map_err(|e| format!("SSH handshake failed: {e}"))?;
-
-            sess.userauth_password(&username, &password)
-                .map_err(|e| format!("SSH authentication failed: {e}"))?;
-            if !sess.authenticated() {
-                return Err("SSH authentication failed".to_string());
-            }
+            let sess = ssh_establish_session_with_retry(
+                &host,
+                port,
+                &username,
+                &password,
+                Duration::from_secs(30),
+                Duration::from_secs(10),
+            )?;
 
             let mut channel = sess
                 .channel_session()

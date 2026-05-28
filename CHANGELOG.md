@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **SSH remote actions could hang on unreachable Linux hosts and leak blocking-pool threads** — `exec`/`exec_with_pty` used `TcpStream::connect`, which blocks for the OS default connect timeout (tens of seconds of SYN retransmits) on a filtered/unreachable host. Because the connect runs inside `spawn_blocking`, the outer `REMOTE_SSH_TIMEOUT_SECS` timeout fired but couldn't cancel the blocking thread, so it stayed occupied — exhausting the blocking pool when many hosts were down. SSH now uses an explicit per-attempt `connect_timeout` (`SSH_CONNECT_TIMEOUT_SECS`) so the thread is freed promptly.
+- **Transient SSH connection blips failed remote actions outright** — the connect/handshake/auth phase is now retried up to `SSH_CONNECT_MAX_ATTEMPTS` on transient errors (timeouts, connection reset, name-resolution hiccups). Only the connection setup is retried — the remote command itself still runs at most once, so non-idempotent actions (restart/shutdown/exec) are never duplicated. Non-transient failures (auth/permission) still fail fast.
+- **WinRM remote actions had no transient-connection retry** — `execute_remote` (the single chokepoint for every Windows probe and action) ran New-PSSession and Invoke-Command in one shot with no retry. The driver script now separates the connection stage (exit code 2 + `QP_CONNECT_FAILED` marker) from the execution stage (exit 1); the Rust side retries **only** the connection stage on transient errors, so the remote command still runs at most once and non-idempotent actions are never duplicated. Timeouts and execution-stage failures are returned immediately.
+- **Linux remote restart/shutdown could stall or report ambiguously when sudo needed a password** — `remote_restart`/`remote_shutdown` now use `sudo -n` (non-interactive) so a host without password-less sudo fails fast with a clear error instead of stalling on a hidden prompt. sudo stays on the actual command, preserving least-privilege sudoers configs.
+- **`launch_ssh` built a `cmd /k ssh …` command line without validating the host/username** — a server or username containing cmd metacharacters could inject commands into the launched terminal. Both are now validated against a strict allowlist (letters, digits, and `. - _ : @ \`) before the command line is built.
+
+### Added
+- `SSH_CONNECT_TIMEOUT_SECS` and `SSH_CONNECT_MAX_ATTEMPTS` constants documenting the SSH connection-establishment bounds.
+
 ## [2.1.5] - 2026-05-28
 
 ### Fixed

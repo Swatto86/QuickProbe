@@ -78,6 +78,25 @@ pub const REMOTE_PS_TIMEOUT_SECS: u64 = 120;
 /// faster than WinRM but the same upper bound prevents indefinite hangs.
 pub const REMOTE_SSH_TIMEOUT_SECS: u64 = 120;
 
+/// Maximum wall-clock time for the TCP connect phase of a single SSH attempt.
+///
+/// **Rationale**: `TcpStream::connect` otherwise blocks for the OS default
+/// connect timeout (20–130s of SYN retransmits) on a filtered/unreachable host.
+/// Because the connect runs inside `spawn_blocking`, the outer
+/// `REMOTE_SSH_TIMEOUT_SECS` timeout cannot cancel it — the blocking thread
+/// stays occupied until the OS gives up, risking blocking-pool exhaustion when
+/// many hosts are down. An explicit `connect_timeout` frees the thread promptly.
+pub const SSH_CONNECT_TIMEOUT_SECS: u64 = 10;
+
+/// Number of connect/handshake/auth attempts for a single SSH operation.
+///
+/// **Rationale**: only the connection-establishment phase is retried (the remote
+/// command itself still runs at most once), so a transient network blip during
+/// connect/handshake/auth is absorbed without risking duplicate command
+/// execution. Bounded so `attempts × (connect + auth) + back-off` stays well
+/// under `REMOTE_SSH_TIMEOUT_SECS`.
+pub const SSH_CONNECT_MAX_ATTEMPTS: u32 = 3;
+
 /// Maximum wall-clock time for a `reg.exe query \\server\HKLM` reachability test
 /// used by `launch_remote_registry`. Each retry is bounded by this timeout, so
 /// the overall budget is `attempts × REG_QUERY_TIMEOUT_SECS + back-off sleeps`.
