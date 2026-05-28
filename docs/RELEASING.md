@@ -15,6 +15,11 @@ Update the version in both:
 - `src-tauri/Cargo.toml` → `version = "X.Y.Z"`
 - `src-tauri/tauri.conf.json` → `"version": "X.Y.Z"`
 
+> The release workflow **enforces** that the pushed tag (`vX.Y.Z`) matches both
+> of these. If they disagree, the `Verify` job fails before any build runs, so a
+> mismatched tag can never ship. (`src-tauri/Cargo.lock`'s `quickprobe` entry is
+> refreshed automatically by `cargo build`.)
+
 ### 2. Update CHANGELOG.md
 
 Move items from `[Unreleased]` to a new version section:
