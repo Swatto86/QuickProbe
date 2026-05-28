@@ -418,7 +418,7 @@ try {
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        let redacted = stderr.replace(password, "<redacted>");
+        let redacted = quickprobe::utils::redact_secret(&stderr, password);
         crate::logger::log_error(&format!(
             "open_explorer_share: share mount failed for '{}': {}",
             server, redacted

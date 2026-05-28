@@ -5,7 +5,7 @@ use rusqlite::TransactionBehavior;
 use std::time::SystemTime;
 
 use super::helpers::*;
-use super::state::{clear_session_cache, invalidate_session_cache};
+use super::state::{clear_session_cache, host_mutation_lock, invalidate_session_cache};
 use super::types::*;
 
 // ---------------------------------------------------------------------------
@@ -245,6 +245,8 @@ pub(crate) async fn set_hosts(hosts: Vec<HostUpdate>) -> Result<(), String> {
     let start = SystemTime::now();
     crate::logger::log_info(&format!("set_hosts: {} host(s)", hosts.len()));
 
+    let _mutation_guard = host_mutation_lock().lock().await;
+
     for (i, host) in hosts.iter().enumerate() {
         let mut fields = Vec::new();
         if host.notes.is_some() {
@@ -294,6 +296,8 @@ pub(crate) async fn save_server_notes(server_name: String, notes: String) -> Res
         normalized_name,
         notes_clean.len()
     ));
+
+    let _mutation_guard = host_mutation_lock().lock().await;
 
     let conn = db::open_db().map_err(|e| format!("Failed to open database: {}", e))?;
 
@@ -353,6 +357,8 @@ pub(crate) async fn update_host(
     if normalized_name.is_empty() {
         return Err("Invalid server name".to_string());
     }
+
+    let _mutation_guard = host_mutation_lock().lock().await;
 
     let conn = db::open_db().map_err(|e| format!("Failed to open database: {}", e))?;
     db::init_schema(&conn).map_err(|e| format!("Failed to initialize database schema: {}", e))?;
@@ -433,33 +439,31 @@ pub(crate) async fn rename_group(old_group: String, new_group: String) -> Result
         return Err("New group name cannot be empty".to_string());
     }
 
-    let mut hosts = get_hosts().await?;
-    let mut updated_count = 0usize;
-    for host in hosts.iter_mut() {
-        let current = host.group.clone().unwrap_or_default();
-        if current.eq_ignore_ascii_case(&old_trim) {
-            host.group = Some(new_trim.clone());
-            updated_count += 1;
-        }
-    }
+    let _mutation_guard = host_mutation_lock().lock().await;
+
+    let conn = db::open_db().map_err(|e| format!("Failed to open database: {}", e))?;
+    db::init_schema(&conn).map_err(|e| format!("Failed to initialize database schema: {}", e))?;
+
+    // Single atomic statement — a get_hosts()/persist_hosts() round-trip would
+    // read every host, mutate in memory, then DELETE-and-reinsert, losing any
+    // concurrent host edit that landed in between. COLLATE NOCASE matches the
+    // previous ASCII-case-insensitive comparison.
+    let updated_count = conn
+        .execute(
+            "UPDATE hosts SET group_name = ?1 WHERE TRIM(group_name) = ?2 COLLATE NOCASE",
+            rusqlite::params![new_trim, old_trim],
+        )
+        .map_err(|e| {
+            crate::logger::log_error(&format!("rename_group: SQL error: {}", e));
+            format!("Database error: {}", e)
+        })?;
 
     if updated_count == 0 {
         crate::logger::log_info("rename_group: no hosts matched");
         return Ok(0);
     }
 
-    let updates: Vec<HostUpdate> = hosts
-        .into_iter()
-        .map(|h| HostUpdate {
-            name: h.name,
-            notes: h.notes,
-            group: h.group,
-            services: h.services,
-            os_type: h.os_type,
-        })
-        .collect();
-
-    persist_hosts(&updates)?;
+    bump_hosts_changed_flag()?;
     crate::logger::log_info(&format!(
         "rename_group: SUCCESS, {} host(s) updated",
         updated_count

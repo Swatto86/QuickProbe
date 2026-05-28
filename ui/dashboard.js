@@ -37,6 +37,13 @@
         }
         const SERVER_ORDER_KEY = 'qp_server_order';
         const SETTINGS_KEY = 'quickprobe_settings';
+        // Group-view layout prefs are dashboard-only UI state (like the table
+        // column widths/order/sort) and are persisted to localStorage. They were
+        // previously routed through settings_set_all, which silently dropped them
+        // because the backend bundle has no such fields — so the saved group
+        // order / focused group were lost on every restart.
+        const GROUP_ORDER_KEY = 'qp_group_order';
+        const FOCUSED_GROUP_KEY = 'qp_focused_group';
         const Utils = window.DashboardUtils;
         let openHostCredentialDialog = null;
         let openNotesDialog = null;
@@ -227,14 +234,32 @@
         // ========== End Confirmation Dialog ==========
 
         function settingsPayload() {
+            // qp_group_order / qp_focused_group are intentionally omitted: they are
+            // persisted to localStorage (see saveGroupOrderLocal/saveFocusedGroupLocal),
+            // not the backend settings bundle.
             return {
                 qp_settings: settingsBundle.qp_settings || defaultSettings(),
                 qp_server_order: settingsBundle.qp_server_order || [],
-                qp_group_order: settingsBundle.qp_group_order || [],
-                qp_focused_group: settingsBundle.qp_focused_group || null,
                 qp_host_view_mode: settingsBundle.qp_host_view_mode || 'table',
                 qp_hosts_changed: settingsBundle.qp_hosts_changed || null
             };
+        }
+
+        function saveGroupOrderLocal() {
+            try {
+                localStorage.setItem(GROUP_ORDER_KEY, JSON.stringify(settingsBundle.qp_group_order || []));
+            } catch (e) { /* ignore */ }
+        }
+
+        function saveFocusedGroupLocal() {
+            try {
+                const fg = settingsBundle.qp_focused_group;
+                if (fg === null || fg === undefined || fg === '') {
+                    localStorage.removeItem(FOCUSED_GROUP_KEY);
+                } else {
+                    localStorage.setItem(FOCUSED_GROUP_KEY, JSON.stringify(fg));
+                }
+            } catch (e) { /* ignore */ }
         }
 
         function readLocalSettingsSnapshot() {
@@ -251,6 +276,14 @@
             } catch (e) {
                 console.warn('Dashboard: failed to read fallback qp_server_order', e);
             }
+            try {
+                const raw = localStorage.getItem(GROUP_ORDER_KEY);
+                if (raw) snapshot.qp_group_order = JSON.parse(raw);
+            } catch (e) { /* ignore */ }
+            try {
+                const raw = localStorage.getItem(FOCUSED_GROUP_KEY);
+                if (raw) snapshot.qp_focused_group = JSON.parse(raw);
+            } catch (e) { /* ignore */ }
             try {
                 const raw = localStorage.getItem(HOST_VIEW_KEY);
                 if (raw) snapshot.qp_host_view_mode = JSON.parse(raw);
@@ -1460,6 +1493,7 @@
                     .filter(Boolean);
 
                 settingsBundle.qp_group_order = groupOrder;
+                saveGroupOrderLocal();
                 queueSettingsSave(settingsPayload());
             },
 
@@ -3473,7 +3507,7 @@
                         return;
                     }
 
-                    const timeoutMs = getProbeTimeoutMs();
+                    const timeoutMs = getQuickProbeTimeoutMs();
                     try {
                         const result = await withTimeout(
                             invoke('get_quick_status', {
@@ -3559,7 +3593,7 @@
 
             quickProbeMeta.set(normalized, { last: now, inFlight: true });
             const { invoke } = window.__TAURI__.core;
-            const timeoutMs = getProbeTimeoutMs();
+            const timeoutMs = getQuickProbeTimeoutMs();
             try {
                 const result = await withTimeout(
                     invoke('get_quick_status', {
@@ -3733,6 +3767,7 @@
             if (hostViewMode !== 'groups') {
                 focusedGroup = null;
                 settingsBundle.qp_focused_group = null;
+                saveFocusedGroupLocal();
             }
             // Reorder mode is card/group spatial: exit it when switching to table
             if (hostViewMode === 'table' && reorderMode) {
@@ -3787,6 +3822,7 @@
 
                 focusedGroup = trimmedNew;
                 settingsBundle.qp_focused_group = focusedGroup;
+                saveFocusedGroupLocal();
                 markHostsChanged();
                 cacheDashboardData();
                 displayAllServers();
@@ -3954,6 +3990,7 @@
             if (focusedGroup && !groups.has(focusedGroup)) {
                 focusedGroup = null;
                 settingsBundle.qp_focused_group = null;
+                saveFocusedGroupLocal();
                 queueSettingsSave(settingsPayload());
             }
 
@@ -4001,6 +4038,7 @@
                     card.addEventListener('click', () => {
                         focusedGroup = canonicalName;
                         settingsBundle.qp_focused_group = focusedGroup;
+                        saveFocusedGroupLocal();
                         queueSettingsSave(settingsPayload());
                         displayAllServers();
                     });
@@ -4085,6 +4123,7 @@
                 const toggleExpanded = () => {
                     focusedGroup = isFocused ? null : canonicalName;
                     settingsBundle.qp_focused_group = focusedGroup;
+                    saveFocusedGroupLocal();
                     queueSettingsSave(settingsPayload());
                     displayAllServers();
                 };
@@ -6306,17 +6345,16 @@
                 hostsByName.delete(serverName);
                 markHostsChanged();
 
-                // Remove the card from DOM without refreshing the entire view
-                const cardToRemove = document.querySelector(`.server-card[data-server="${serverName}"]`);
-                if (cardToRemove) {
-                    cardToRemove.remove();
-                }
-
-                // Also remove from group view if present
-                const groupCardToRemove = document.querySelector(`.group-card-hosts .server-card[data-server="${serverName}"]`);
-                if (groupCardToRemove) {
-                    groupCardToRemove.remove();
-                }
+                // Remove the card/row from the DOM without refreshing the entire
+                // view. Cards and table rows are tagged with `data-server-name`
+                // (not `data-server`), so the old selector never matched and the
+                // deleted host lingered on screen until an unrelated re-render.
+                const safeName = (typeof CSS !== 'undefined' && CSS.escape)
+                    ? CSS.escape(serverName)
+                    : serverName;
+                document.querySelectorAll(
+                    `.server-card[data-server-name="${safeName}"], tr[data-server-name="${safeName}"]`
+                ).forEach((el) => el.remove());
 
                 // Update summary stats without changing the current filter/view
                 const summary = Utils.summarize(serversData);
@@ -6651,12 +6689,6 @@
             pushNotification(message, 'warning', { timeoutMs });
         }
 
-        function escapeHtml(text) {
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
-        }
-
         /**
          * Renders the probe status row for a server card.
          *
@@ -6854,6 +6886,7 @@
             if (focusedGroup !== null) {
                 focusedGroup = null;
                 settingsBundle.qp_focused_group = null;
+                saveFocusedGroupLocal();
                 queueSettingsSave(settingsPayload());
             }
             if (filterType === 'all') {
@@ -7481,8 +7514,9 @@
         }
 
         function escapeHtml(str) {
-            if (!str) return '';
-            return str.replace(/&/g, '&amp;')
+            if (str === null || str === undefined) return '';
+            return String(str)
+                .replace(/&/g, '&amp;')
                 .replace(/</g, '&lt;')
                 .replace(/>/g, '&gt;')
                 .replace(/"/g, '&quot;')
