@@ -348,9 +348,64 @@ pub(crate) fn extract_health_fields_comprehensive(
 }
 
 pub(crate) fn escape_csv_field(field: &str) -> String {
-    if field.contains(',') || field.contains('"') || field.contains('\n') || field.contains('\r') {
-        format!("\"{}\"", field.replace('"', "\"\""))
+    // Neutralise spreadsheet formula injection: a cell beginning with =, +, -,
+    // @, or a leading tab/CR is evaluated as a formula by Excel/Sheets. Host
+    // notes and AD descriptions are attacker-influenceable, so a value like
+    // `=cmd|'/c calc'!A1` would execute on open. Prefix such values with an
+    // apostrophe — but leave genuine numbers (including negatives) untouched so
+    // numeric metric columns still import as numbers.
+    let is_numeric = field.parse::<f64>().is_ok();
+    let needs_formula_guard = !is_numeric
+        && field
+            .chars()
+            .next()
+            .map(|c| matches!(c, '=' | '+' | '-' | '@' | '\t' | '\r'))
+            .unwrap_or(false);
+
+    let guarded = if needs_formula_guard {
+        format!("'{}", field)
     } else {
         field.to_string()
+    };
+
+    if guarded.contains(',')
+        || guarded.contains('"')
+        || guarded.contains('\n')
+        || guarded.contains('\r')
+    {
+        format!("\"{}\"", guarded.replace('"', "\"\""))
+    } else {
+        guarded
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::escape_csv_field;
+
+    #[test]
+    fn neutralises_formula_injection() {
+        // No embedded separators -> apostrophe-prefixed but not quoted.
+        assert_eq!(escape_csv_field("=cmd|'/c calc'!A1"), "'=cmd|'/c calc'!A1");
+        assert_eq!(escape_csv_field("@SUM(A1)"), "'@SUM(A1)");
+        // Non-numeric value starting with '+' is guarded; a numeric "+1234" is not.
+        assert_eq!(escape_csv_field("+1-800-555"), "'+1-800-555");
+        assert_eq!(escape_csv_field("+1234"), "+1234");
+        // A guarded value that also contains a comma must still be quoted.
+        assert_eq!(escape_csv_field("=A1,B2"), "\"'=A1,B2\"");
+    }
+
+    #[test]
+    fn preserves_plain_and_numeric_values() {
+        assert_eq!(escape_csv_field("DC01"), "DC01");
+        assert_eq!(escape_csv_field("-12.5"), "-12.5");
+        assert_eq!(escape_csv_field("42"), "42");
+        assert_eq!(escape_csv_field("normal note"), "normal note");
+    }
+
+    #[test]
+    fn still_quotes_embedded_separators() {
+        assert_eq!(escape_csv_field("a,b"), "\"a,b\"");
+        assert_eq!(escape_csv_field("say \"hi\""), "\"say \"\"hi\"\"\"");
     }
 }

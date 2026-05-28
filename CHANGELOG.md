@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Saved group order and focused group were lost on every restart** — the dashboard wrote `qp_group_order` and `qp_focused_group` into the `settings_set_all` payload, but the backend settings bundle has no such fields, so they were silently discarded and `settings_get_all` always returned them empty. These dashboard-only layout prefs are now persisted to `localStorage` (consistent with the table column width/order/sort prefs), so group arrangement and the expanded group survive restarts.
+- **Deleted host card/row lingered on screen** — `deleteHostFromDashboard` removed the node via a `.server-card[data-server="…"]` selector, but cards and table rows are tagged with `data-server-name`, so the selector never matched and the deleted host stayed visible until an unrelated re-render. Now targets `data-server-name` for both cards and table rows (and escapes the name via `CSS.escape`).
+- **Panic risk truncating non-ASCII remote output** — several error/debug paths sliced strings by byte offset (`&s[..n]`), which panics when the cut lands inside a multi-byte UTF-8 sequence (e.g. accented characters or non-Latin host names in PowerShell/SSH output). Replaced with char-safe truncation in `winrm.rs`, `ssh.rs`, and `commands/services.rs`.
+- **Network-adapter probe discarded all adapters on a single stray element** — `coerce_adapters_from_str` bailed out of the whole list with `?` on the first non-object array element, wiping every parsed adapter and falsely flagging a WinRM degradation. It now skips non-object elements (matching the quick-status path).
+- **Corrupted error redaction when a stored password was empty** — `str::replace(&password, …)` with an empty password inserts the marker between every character, turning a redacted error into garbage. Redaction now goes through `redact_secret`, which is a no-op for empty secrets (`winrm.rs`, `commands/launcher.rs`).
+- **CSV export was vulnerable to spreadsheet formula injection** — host notes and AD descriptions are attacker-influenceable, so a value like `=cmd|'/c calc'!A1` would execute when the export is opened in Excel. `escape_csv_field` now prefixes formula-triggering values (`=`, `+`, `-`, `@`, leading tab/CR) with an apostrophe while leaving genuine numbers untouched.
+- **Read-modify-write race in `rename_group`** — renaming a group read every host, mutated in memory, then deleted-and-reinserted the whole table, losing any concurrent host edit. Replaced with a single atomic `UPDATE … WHERE TRIM(group_name) = ? COLLATE NOCASE` statement.
+- **Heartbeat and quick-probe used the full-probe timeout** — `get_quick_status` calls were bounded by `getProbeTimeoutMs()` (default 90 s) instead of `getQuickProbeTimeoutMs()` (default 30 s), tying up workers far longer than intended on slow/unreachable hosts.
+- **Duplicate `escapeHtml` definition** — two same-scope declarations meant the quote-escaping version silently won via hoisting while the other was dead code. Removed the dead one and hardened the survivor against non-string input.
+- **Default probe timeout inconsistent with documented intent** — the backend seeded `probeTimeoutSeconds: 60`, masking the intended 90 s default on fresh installs. Backend defaults now match the dashboard (90 s) and include `quickProbeTimeoutSeconds: 30`.
+
 ## [2.1.4] - 2026-05-27
 
 ### Fixed

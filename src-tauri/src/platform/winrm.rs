@@ -573,8 +573,8 @@ impl WindowsRemoteSession {
     fn parse_error_with_snippet(label: &str, err: serde_json::Error, raw: &str) -> String {
         let snippet = raw.trim();
         let max_len = 400;
-        let preview = if snippet.len() > max_len {
-            format!("{}...", &snippet[..max_len])
+        let preview = if snippet.chars().count() > max_len {
+            format!("{}...", snippet.chars().take(max_len).collect::<String>())
         } else {
             snippet.to_string()
         };
@@ -880,9 +880,9 @@ try {
             let stderr = String::from_utf8_lossy(&output.stderr);
             let stdout = String::from_utf8_lossy(&output.stdout);
             let error_msg = if !stderr.is_empty() {
-                stderr.replace(&password, "<redacted>")
+                crate::utils::redact_secret(&stderr, &password)
             } else if !stdout.is_empty() {
-                stdout.replace(&password, "<redacted>")
+                crate::utils::redact_secret(&stdout, &password)
             } else {
                 "Unknown error".to_string()
             };
@@ -1729,7 +1729,7 @@ try {
             };
 
             // Redact password from any echoed error output
-            let redacted_error = raw_error.replace(&password, "<redacted>");
+            let redacted_error = crate::utils::redact_secret(&raw_error, &password);
 
             // Log the full stderr for diagnostics
             crate::logger::log_error(&format!(
@@ -1807,8 +1807,8 @@ try {
 
         // Return a longer snippet to aid debugging remote PowerShell errors
         let max_len = 4000;
-        if snippet.len() > max_len {
-            format!("{}...", &snippet[..max_len])
+        if snippet.chars().count() > max_len {
+            format!("{}...", snippet.chars().take(max_len).collect::<String>())
         } else {
             snippet.to_string()
         }

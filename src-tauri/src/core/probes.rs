@@ -760,7 +760,13 @@ fn coerce_adapters_from_str(raw: &str) -> Option<Vec<NetAdapterInfo>> {
 
     let mut adapters = Vec::new();
     for item in list {
-        let obj = item.as_object()?;
+        // Skip any non-object element rather than discarding every adapter
+        // parsed so far — a single stray scalar from ConvertTo-Json must not
+        // wipe out the whole list (and falsely flag a WinRM degradation).
+        let obj = match item.as_object() {
+            Some(o) => o,
+            None => continue,
+        };
         let alias = obj
             .get("alias")
             .and_then(|v| v.as_str())
@@ -802,6 +808,18 @@ fn coerce_adapters_from_str(raw: &str) -> Option<Vec<NetAdapterInfo>> {
 mod tests {
     use super::*;
     use crate::core::mock_session::MockRemoteSession;
+
+    // ==================== Adapter Coercion Tests ====================
+
+    #[test]
+    fn coerce_adapters_skips_non_object_elements() {
+        // A stray scalar in the array must not discard the valid adapters.
+        let raw = r#"[{"alias":"Ethernet0","ipv4":["10.0.0.5"]}, "unexpected", null]"#;
+        let adapters = coerce_adapters_from_str(raw).expect("valid adapter should survive");
+        assert_eq!(adapters.len(), 1);
+        assert_eq!(adapters[0].alias, "Ethernet0");
+        assert_eq!(adapters[0].ipv4, vec!["10.0.0.5".to_string()]);
+    }
 
     // ==================== Disk Alert Probe Tests ====================
 

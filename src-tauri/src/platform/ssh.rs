@@ -226,14 +226,10 @@ impl LinuxRemoteSession {
         // Use `ip addr` to get interface information - simpler parsing approach
         let output = self.exec("ip -o addr show 2>/dev/null").await?;
 
+        let output_preview: String = output.chars().take(1000).collect();
         crate::logger::log_debug(&format!(
             "get_net_adapters ip addr output for '{}': {}",
-            self.server_name,
-            if output.len() > 1000 {
-                &output[..1000]
-            } else {
-                &output
-            }
+            self.server_name, output_preview
         ));
 
         // Also get gateway and DNS
