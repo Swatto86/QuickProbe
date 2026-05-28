@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.5] - 2026-05-28
+
 ### Fixed
 - **Saved group order and focused group were lost on every restart** — the dashboard wrote `qp_group_order` and `qp_focused_group` into the `settings_set_all` payload, but the backend settings bundle has no such fields, so they were silently discarded and `settings_get_all` always returned them empty. These dashboard-only layout prefs are now persisted to `localStorage` (consistent with the table column width/order/sort prefs), so group arrangement and the expanded group survive restarts.
 - **Deleted host card/row lingered on screen** — `deleteHostFromDashboard` removed the node via a `.server-card[data-server="…"]` selector, but cards and table rows are tagged with `data-server-name`, so the selector never matched and the deleted host stayed visible until an unrelated re-render. Now targets `data-server-name` for both cards and table rows (and escapes the name via `CSS.escape`).
@@ -18,6 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Heartbeat and quick-probe used the full-probe timeout** — `get_quick_status` calls were bounded by `getProbeTimeoutMs()` (default 90 s) instead of `getQuickProbeTimeoutMs()` (default 30 s), tying up workers far longer than intended on slow/unreachable hosts.
 - **Duplicate `escapeHtml` definition** — two same-scope declarations meant the quote-escaping version silently won via hoisting while the other was dead code. Removed the dead one and hardened the survivor against non-string input.
 - **Default probe timeout inconsistent with documented intent** — the backend seeded `probeTimeoutSeconds: 60`, masking the intended 90 s default on fresh installs. Backend defaults now match the dashboard (90 s) and include `quickProbeTimeoutSeconds: 30`.
+- **Read-modify-write race across host mutations** — `scan_domain`'s `get_hosts` → merge → `persist_hosts` reconcile could lose a concurrent host edit. A global host-mutation mutex now serializes `set_hosts`, `update_host`, `save_server_notes`, `rename_group`, `scan_domain`, and backup restore (the lock is held only across the reconcile, not the slow LDAP search).
+- **Duplicate WinRM session creation under concurrent probes** — two probes of the same host could both miss the cache and both build a `WindowsRemoteSession`, leaving an orphan `wsmprovhost.exe` on the target. `connect_remote_session` now serializes creation per host (with a double-checked cache read); different hosts still connect in parallel.
 
 ## [2.1.4] - 2026-05-27
 
@@ -99,7 +103,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - WinRM session cleanup (explicit PSSession management)
 - Credential Manager DPAPI storage
 
-[Unreleased]: https://github.com/Swatto86/QuickProbe/compare/v2.1.3...HEAD
+[Unreleased]: https://github.com/Swatto86/QuickProbe/compare/v2.1.5...HEAD
+[2.1.5]: https://github.com/Swatto86/QuickProbe/compare/v2.1.4...v2.1.5
+[2.1.4]: https://github.com/Swatto86/QuickProbe/compare/v2.1.3...v2.1.4
 [2.1.3]: https://github.com/Swatto86/QuickProbe/releases/tag/v2.1.3
 [2.1.1]: https://github.com/Swatto86/QuickProbe/releases/tag/v2.1.1
 [2.1.0]: https://github.com/Swatto86/QuickProbe/releases/tag/v2.1.0
