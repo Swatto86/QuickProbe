@@ -177,10 +177,47 @@ jobs:
           includeUpdaterJson: true
           updaterJsonKeepUniversal: true
 
+      # Portable single-exe artifact. QuickProbe bundles no resources or
+      # sidecars (tauri.conf bundle.resources/externalBin empty) and is built
+      # with MSVC, which static-links WebView2Loader — so the raw compiled exe
+      # runs standalone on Windows 10/11 with no install. Located by glob
+      # because the binary name is the Cargo package name, not productName.
+      - name: Stage portable exe
+        shell: pwsh
+        run: |
+          $ver = (Get-Content 'src-tauri/tauri.conf.json' -Raw | ConvertFrom-Json).version
+          $exe = Get-ChildItem 'src-tauri/target/release/*.exe' -File -ErrorAction SilentlyContinue |
+                 Where-Object { $_.Name -notlike '*setup*' } |
+                 Sort-Object Length -Descending | Select-Object -First 1
+          if (-not $exe) { Write-Error 'No portable exe found in src-tauri/target/release'; exit 1 }
+          $dest = "QuickProbe_${ver}_x64-portable.exe"
+          Copy-Item $exe.FullName $dest -Force
+          "portable_exe=$dest" | Out-File -FilePath $env:GITHUB_ENV -Append
+          Write-Host "Staged portable exe: $dest ($([math]::Round($exe.Length/1MB,1)) MB)"
+
+      - name: Upload portable exe to release
+        uses: actions/github-script@v7
+        env:
+          RELEASE_ID: ${{ needs.create-release.outputs.release_id }}
+          PORTABLE_EXE: ${{ env.portable_exe }}
+        with:
+          script: |
+            const fs = require('fs');
+            const name = process.env.PORTABLE_EXE;
+            await github.rest.repos.uploadReleaseAsset({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: parseInt(process.env.RELEASE_ID),
+              name,
+              data: fs.readFileSync(name),
+            });
+            console.log(`Uploaded ${name}`);
+
       - name: Generate SHA256 checksums
         shell: pwsh
         run: |
-          $artifacts = Get-ChildItem -Path "src-tauri/target/release/bundle/nsis" -File -ErrorAction SilentlyContinue
+          $artifacts = @(Get-ChildItem -Path "src-tauri/target/release/bundle/nsis" -File -ErrorAction SilentlyContinue)
+          $artifacts += Get-ChildItem -Path "$env:portable_exe" -File -ErrorAction SilentlyContinue
           if ($artifacts) {
             $checksums = $artifacts | ForEach-Object {
               $hash = (Get-FileHash -Path $_.FullName -Algorithm SHA256).Hash.ToLower()
