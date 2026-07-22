@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.7] - 2026-07-22
+
+### Added
+- **Portable single-exe artifact** — releases now also publish `QuickProbe_<version>_x64-portable.exe`: the raw executable with no installer, for running from a USB stick or a locked-down box. The NSIS `-setup.exe` installer is still published alongside it.
+
 ## [2.1.6] - 2026-05-28
 
 ### Fixed
