@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.8] - 2026-09-23
+
 ### Fixed
 - **A fresh launch showed no window at all**: `ui/app.js` read Tauri v1's `appWindow` export, which Tauri v2 does not provide, so the login window never revealed itself and QuickProbe appeared to do nothing unless the tray icon or Ctrl+Shift+R was used. It now uses `getCurrentWindow()`. A WebDriver regression test hides the window and reloads the page to prove start-up shows it.
 - **The update window claimed the running version needed updating**: the `update-required` window is created hidden at every start-up and rendered whatever the release check returned without checking `available`, so it read "v2.1.7 → v2.1.7" whenever it was shown. It now presents an update only when the backend reports a newer release (`shouldPromptForUpdate` in `ui/update-logic.js`, unit-tested).
@@ -128,7 +130,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - WinRM session cleanup (explicit PSSession management)
 - Credential Manager DPAPI storage
 
-[Unreleased]: https://github.com/Swatto86/QuickProbe/compare/v2.1.6...HEAD
+[Unreleased]: https://github.com/Swatto86/QuickProbe/compare/v2.1.8...HEAD
+[2.1.8]: https://github.com/Swatto86/QuickProbe/compare/v2.1.7...v2.1.8
+[2.1.7]: https://github.com/Swatto86/QuickProbe/compare/v2.1.6...v2.1.7
 [2.1.6]: https://github.com/Swatto86/QuickProbe/compare/v2.1.5...v2.1.6
 [2.1.5]: https://github.com/Swatto86/QuickProbe/compare/v2.1.4...v2.1.5
 [2.1.4]: https://github.com/Swatto86/QuickProbe/compare/v2.1.3...v2.1.4
