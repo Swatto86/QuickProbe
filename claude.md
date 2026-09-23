@@ -75,13 +75,14 @@ QuickProbe/
 ├── docs/
 │   ├── BUILD_FROM_SCRATCH.md     # Full Windows build guide
 │   └── RELEASING.md              # Release process
+├── tests/unit/                    # Node unit tests for pure frontend logic (`npm test`); kept outside ui/ so they never ship
 ├── e2e/                           # WebdriverIO E2E test specs
 │   ├── app-launch.spec.js
 │   ├── dashboard.spec.js
 │   ├── hosts.spec.js
 │   └── options.spec.js
 ├── scripts/
-│   └── verify.ps1                # THE single gate: fmt → clippy --all-targets → test → lib build → full tauri build (NSIS)
+│   └── verify.ps1                # THE single gate: fmt → clippy --all-targets → test → lib build → npm test → full tauri build (NSIS)
 ├── rust-toolchain.toml            # Pins rustc version (auto-installed by rustup; must be at repo root, not src-tauri/, so cargo finds it from any cwd)
 ├── src-tauri/
 │   ├── Cargo.toml                # Rust deps & features
@@ -147,6 +148,7 @@ QuickProbe/
 │   ├── dashboard-minimal.css     # Dashboard-specific overrides (sticky header, etc.)
 │   ├── theme.js                  # DaisyUI theme switching + cross-window sync
 │   ├── update-required.js        # Mandatory update prompt logic
+│   ├── update-logic.js           # Pure update decision (shouldPromptForUpdate), unit-tested from tests/unit/
 │   └── input.css → styles.css    # Tailwind CSS pipeline (styles.css is GENERATED — gitignored)
 ├── claude.md                      # ← THIS FILE (Project Atlas)
 ├── CHANGELOG.md                   # Keep-a-Changelog format
@@ -188,7 +190,7 @@ QuickProbe/
 
 | Script | Purpose |
 |---|---|
-| `scripts/verify.ps1` | **Single gate**: `cargo fmt --check` → `cargo clippy --all-targets -D warnings` → `cargo test --lib` → `cargo build --lib --release` → `npm ci` + `npx tauri build` (full NSIS bundle) |
+| `scripts/verify.ps1` | **Single gate**: `cargo fmt --check` → `cargo clippy --all-targets -D warnings` → `cargo test --lib` → `cargo build --lib --release` → `npm ci` + `npm test` (frontend unit tests in `tests/unit/`) + `npx tauri build` (full NSIS bundle) |
 | `npm run dev` | Build CSS + Tauri dev mode |
 | `npm run build` | Build CSS + full Tauri release build |
 | `npm run test:e2e` | WebdriverIO E2E suite against built app |
@@ -216,7 +218,8 @@ A fresh clone is **not** ready to build — read this before the first `tauri bu
 | **CI** | `.github/workflows/ci.yml` — runs `verify.ps1` on push/PR to `main` |
 | **Release** | `.github/workflows/release.yml` — tag `v*` triggers verify → NSIS build → GitHub Release |
 | **Rust unit tests** | `cargo test --lib --manifest-path src-tauri/Cargo.toml` |
-| **E2E tests** | `npm run test:e2e` (requires built app + msedgedriver) |
+| **Frontend unit tests** | `npm test` (runs `tests/unit/`, pure JS logic via node:test) |
+| **E2E tests** | `npm run test:e2e` (requires built app + msedgedriver; set `QUICKPROBE_E2E_APP` to test a specific build, e.g. a debug exe) |
 | **CSS build** | `npm run build:css` (Tailwind → `ui/styles.css`) |
 
 ### Cross-platform verification (Linux/macOS dev)

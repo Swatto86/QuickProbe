@@ -32,6 +32,11 @@ const DRIVER_PORT = 4444;
  * Determine the application binary path based on platform
  */
 function getAppBinaryPath() {
+  // Optional override, e.g. a debug build during iteration, so the suite never guesses
+  // between two builds that would otherwise share target/release.
+  if (process.env.QUICKPROBE_E2E_APP) {
+    return path.resolve(process.env.QUICKPROBE_E2E_APP);
+  }
   const platform = process.platform;
   const basePath = path.resolve(__dirname, 'src-tauri', 'target', 'release');
 
@@ -267,25 +272,27 @@ exports.config = {
    * the browser and execute commands.
    * 
    * CRITICAL: This hook enables E2E test mode by:
-   * 1. Sending Ctrl+Shift+R to show the window if hidden in system tray
-   * 2. Setting localStorage flag that app.js checks
-   * 3. Refreshing the page to re-initialize with E2E mode active
+   * 1. Setting localStorage flag that app.js checks
+   * 2. Refreshing the page to re-initialize with E2E mode active, which shows the window
+   *
+   * The window is not forced visible from outside (for example with the Ctrl+Shift+R tray
+   * shortcut): that masked the start-up bug where the login window never showed itself,
+   * and it typed the shortcut into whichever application had focus.
    */
   before: async function (capabilities, specs) {
     console.log('[E2E] Initializing test mode...');
-    
-    // First, send Ctrl+Shift+R to show the window if it's hidden
-    // The window might be hidden in system tray - this global shortcut shows it
-    if (process.platform === 'win32') {
-      console.log('[E2E] Sending Ctrl+Shift+R to ensure window is visible...');
-      spawnSync('powershell', [
-        '-Command',
-        `Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('^+r')`
-      ], { stdio: 'ignore' });
+
+    // The app has several webviews (the hidden update window also loads at start-up) and the
+    // driver may attach to any of them, so switch explicitly to the "main" window.
+    let attached = false;
+    for (const handle of await browser.getWindowHandles()) {
+      await browser.switchToWindow(handle);
+      const label = await browser.execute(() => window.__TAURI__.window.getCurrentWindow().label);
+      if (label === 'main') { attached = true; break; }
     }
-    
-    // Wait for window to become visible
-    await browser.pause(2000);
+    if (!attached) {
+      throw new Error('[E2E] Could not find the "main" window among the WebDriver targets');
+    }
     
     // Set E2E test mode flag in localStorage
     // This flag is checked by app.js to:

@@ -8,7 +8,7 @@
     "build": "npm run build:css && tauri build",
     "build:css": "npx tailwindcss -i ./ui/input.css -o ./ui/styles.css --minify",
     "watch:css": "npx tailwindcss -i ./ui/input.css -o ./ui/styles.css --watch",
-    "test": "node ui/tests/all-tests.js",
+    "test": "node --test tests/unit/update-logic.test.js",
     "test:e2e": "npx wdio wdio.conf.cjs",
     "test:e2e:spec": "npx wdio wdio.conf.cjs --spec"
   },

@@ -1,5 +1,7 @@
 const { invoke } = window.__TAURI__.core;
-const { appWindow } = window.__TAURI__.window;
+// Tauri v2 exposes the current window through getCurrentWindow(); the v1 `appWindow`
+// export no longer exists, and without this handle the login window never shows itself.
+const appWindow = window.__TAURI__.window.getCurrentWindow();
 
 // E2E Test Mode Detection
 // Check localStorage flag (set by test framework) or window global

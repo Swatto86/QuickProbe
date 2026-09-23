@@ -75,6 +75,9 @@ try {
     Invoke-Step "npm ci (install frontend deps)" {
         npm ci
     }
+    Invoke-Step "npm test (frontend unit tests)" {
+        npm test
+    }
     Invoke-Step "npx tauri build (frontend + bin + NSIS installer)" {
         npx tauri build
     }

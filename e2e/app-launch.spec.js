@@ -13,6 +13,29 @@
 
 describe('QuickProbe Application Launch', () => {
   describe('Initial Window', () => {
+    // Regression: app.js used Tauri v1's `appWindow`, which Tauri v2 does not provide, so the
+    // login window never showed itself and a fresh launch displayed nothing at all.
+    it('should show the login window itself after start-up', async () => {
+      const isVisible = () => browser.executeAsync((done) => {
+        window.__TAURI__.window.getCurrentWindow().isVisible().then(done, () => done(false));
+      });
+
+      // The session must be attached to the main window, not the hidden update window.
+      const label = await browser.execute(() => window.__TAURI__.window.getCurrentWindow().label);
+      expect(label).toBe('main');
+
+      // Hide the window, then load the login page so only its own start-up code can reveal it.
+      await browser.executeAsync((done) => {
+        window.__TAURI__.window.getCurrentWindow().hide().then(() => done(), () => done());
+      });
+      await browser.url('http://tauri.localhost/login.html');
+
+      await browser.waitUntil(isVisible, {
+        timeout: 10000,
+        timeoutMsg: 'the login window stayed hidden after start-up',
+      });
+    });
+
     it('should have a valid URL', async () => {
       const url = await browser.getUrl();
       

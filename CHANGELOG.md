@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **A fresh launch showed no window at all**: `ui/app.js` read Tauri v1's `appWindow` export, which Tauri v2 does not provide, so the login window never revealed itself and QuickProbe appeared to do nothing unless the tray icon or Ctrl+Shift+R was used. It now uses `getCurrentWindow()`. A WebDriver regression test hides the window and reloads the page to prove start-up shows it.
+- **The update window claimed the running version needed updating**: the `update-required` window is created hidden at every start-up and rendered whatever the release check returned without checking `available`, so it read "v2.1.7 → v2.1.7" whenever it was shown. It now presents an update only when the backend reports a newer release (`shouldPromptForUpdate` in `ui/update-logic.js`, unit-tested).
+
+### Changed
+- `npm test` now runs the frontend unit tests in `tests/unit/` (it previously pointed at a file that did not exist), and `scripts/verify.ps1` runs them.
+- The E2E setup no longer sends Ctrl+Shift+R to force the window visible; that masked the start-up bug and typed the shortcut into whichever application had focus.
+
 ## [2.1.7] - 2026-07-22
 
 ### Added

@@ -105,7 +105,8 @@ async function init() {
         // Fetch update info from the backend
         updateInfo = await invoke('check_for_update');
         
-        if (updateInfo) {
+        // Only present an update the backend says is newer than the running version.
+        if (shouldPromptForUpdate(updateInfo)) {
             displayUpdateInfo(updateInfo);
         }
     } catch (error) {
