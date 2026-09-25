@@ -1,20 +1,23 @@
-# Copilot Agent Instructions — QuickProbe
+# QuickProbe — agent instructions
+
+Every coding agent loads this file itself. `ARCHITECTURE.md` is the Project Atlas: read the
+parts a task needs, and update it in the same change whenever structure, APIs, boundaries,
+build or config change.
 
 ## Mandatory Rules
 
 1. **Always run `scripts/verify.ps1` before claiming work is done.** This is the single source of truth for repo health.
 2. **Do not weaken checks to make things pass.** Fix the underlying issue instead.
-3. **Prefer small, focused PRs.** One concern per PR. Keep diffs auditable.
+3. **Prefer small, focused commits.** One concern per commit. Keep diffs auditable.
 4. **Do not commit secrets, credentials, or API keys.** Use environment variables or Windows Credential Manager.
 5. **Do not silence warnings without justification.** If a warning is suppressed, document why in a code comment.
 
 ## Development Workflow
 
-1. Create a branch from `main` (e.g., `fix/issue-name` or `feat/feature-name`).
+1. Work directly on `main`: this repository has one branch and takes no PRs.
 2. Make changes — keep them small and reversible.
 3. Run `pwsh -File scripts/verify.ps1` and confirm all 4 steps pass.
-4. Push and open a PR against `main`.
-5. Wait for CI to pass before requesting merge.
+4. Commit and push to `main`; CI runs on the push.
 
 ## Tech Stack
 

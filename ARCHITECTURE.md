@@ -67,7 +67,6 @@ one-click RDP, service/process management, and encrypted backup/restore — all 
 ```
 QuickProbe/
 ├── .github/
-│   ├── copilot-instructions.md   # Agent collaboration policy
 │   ├── pull_request_template.md  # PR checklist
 │   └── workflows/
 │       ├── ci.yml                # Push/PR quality gate (verify.ps1)
@@ -150,7 +149,8 @@ QuickProbe/
 │   ├── update-required.js        # Mandatory update prompt logic
 │   ├── update-logic.js           # Pure update decision (shouldPromptForUpdate), unit-tested from tests/unit/
 │   └── input.css → styles.css    # Tailwind CSS pipeline (styles.css is GENERATED — gitignored)
-├── claude.md                      # ← THIS FILE (Project Atlas)
+├── AGENTS.md                      # Agent instructions, loaded by every coding agent
+├── ARCHITECTURE.md                # ← THIS FILE (Project Atlas)
 ├── CHANGELOG.md                   # Keep-a-Changelog format
 ├── README.md                      # User-facing documentation
 ├── package.json                   # Node deps + npm scripts
