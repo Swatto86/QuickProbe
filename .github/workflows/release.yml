@@ -55,7 +55,7 @@ jobs:
 
       - name: Run verification
         shell: pwsh
-        run: pwsh -File scripts/verify.ps1
+        run: pwsh -File scripts/verify.ps1 -Bundle
 
   create-release:
     needs: verify

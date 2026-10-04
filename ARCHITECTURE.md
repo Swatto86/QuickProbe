@@ -81,7 +81,7 @@ QuickProbe/
 │   ├── hosts.spec.js
 │   └── options.spec.js
 ├── scripts/
-│   └── verify.ps1                # THE single gate: fmt → clippy --all-targets → test → lib build → npm test → full tauri build (NSIS)
+│   └── verify.ps1                # THE single gate: fmt → clippy --all-targets → test → npm test → debug tauri build (no installer); `-Bundle` (CI, releases): release lib build + full tauri build (NSIS)
 ├── rust-toolchain.toml            # Pins rustc version (auto-installed by rustup; must be at repo root, not src-tauri/, so cargo finds it from any cwd)
 ├── src-tauri/
 │   ├── Cargo.toml                # Rust deps & features
@@ -190,7 +190,7 @@ QuickProbe/
 
 | Script | Purpose |
 |---|---|
-| `scripts/verify.ps1` | **Single gate**: `cargo fmt --check` → `cargo clippy --all-targets -D warnings` → `cargo test --lib` → `cargo build --lib --release` → `npm ci` + `npm test` (frontend unit tests in `tests/unit/`) + `npx tauri build` (full NSIS bundle) |
+| `scripts/verify.ps1` | **Single gate**: `cargo fmt --check` → `cargo clippy --all-targets -D warnings` → `cargo test --lib` → `npm ci` + `npm test` (frontend unit tests in `tests/unit/`) → `npx tauri build --debug --no-bundle`, then asserts the generated `ui/styles.css` exists (the 2.1.4 unstyled-installer regression). `-Bundle` (CI and releases) builds `cargo build --lib --release` + `npx tauri build` (full NSIS bundle) instead of the debug binary |
 | `npm run dev` | Build CSS + Tauri dev mode |
 | `npm run build` | Build CSS + full Tauri release build |
 | `npm run test:e2e` | WebdriverIO E2E suite against built app |
@@ -206,7 +206,7 @@ A fresh clone is **not** ready to build — read this before the first `tauri bu
 1. **`npm ci`** — installs frontend devDeps. Without it, `tauri build` fails before any Rust step.
 2. **Rust toolchain auto-installs.** `src-tauri/rust-toolchain.toml` pins the version; rustup downloads it the first time you run `cargo` in this repo. Don't override with `rustup override`.
 3. **`ui/styles.css` is GENERATED**, not source — gitignored. The build pipeline runs `npm run build:css` automatically via `beforeBuildCommand` in `tauri.conf.json`. If you ever edit this config, do NOT empty those fields (past incident: v2.1.3 shipped an installer without CSS → unstyled white windows).
-4. **Verify locally before pushing**: `pwsh -File scripts/verify.ps1`. This is the same gate CI runs; if it passes locally and CI fails, it usually means your rustc is older than CI's pinned version — `rustup update` fixes that.
+4. **Verify locally before pushing**: `pwsh -File scripts/verify.ps1`. CI runs the same gate with `-Bundle` (release build + NSIS installer); if it passes locally and CI fails, it usually means your rustc is older than CI's pinned version — `rustup update` fixes that.
 5. **Logs**: `%LOCALAPPDATA%\QuickProbe\logs\`. In release builds, file logging is off by default — set `QP_ENABLE_LOGGING=1` to enable, and `QP_LOG_VERBOSE=1` for debug-level output.
 
 ### Commands
@@ -215,7 +215,7 @@ A fresh clone is **not** ready to build — read this before the first `tauri bu
 |---|---|
 | **Verify (local, Windows)** | `pwsh -File scripts/verify.ps1` |
 | **Verify (local, Linux/macOS dev)** | See **Cross-platform verification** note below — `cargo clippy --all-targets --no-default-features` on Linux is **not enough** to match CI |
-| **CI** | `.github/workflows/ci.yml` — runs `verify.ps1` on push/PR to `main` |
+| **CI** | `.github/workflows/ci.yml` — runs `verify.ps1 -Bundle` on push/PR to `main` |
 | **Release** | `.github/workflows/release.yml` — tag `v*` triggers verify → NSIS build → GitHub Release |
 | **Rust unit tests** | `cargo test --lib --manifest-path src-tauri/Cargo.toml` |
 | **Frontend unit tests** | `npm test` (runs `tests/unit/`, pure JS logic via node:test) |

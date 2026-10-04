@@ -16,7 +16,8 @@ build or config change.
 
 1. Work directly on `main`: this repository has one branch and takes no PRs.
 2. Make changes — keep them small and reversible.
-3. Run `pwsh -File scripts/verify.ps1` and confirm all 4 steps pass.
+3. Run `pwsh -File scripts/verify.ps1` and confirm it ends with ALL CHECKS PASSED. It builds a
+   debug binary, not the installer; CI and releases run it with `-Bundle` (release build + NSIS).
 4. Commit and push to `main`; CI runs on the push.
 
 ## Tech Stack
