@@ -1,0 +1,18 @@
+# Code files over 400 lines when the size check was adopted, with their size then.
+# They may not grow: split one, or give it a "size-exception: <reason>" line, to take it off this list.
+# pwsh ~/.agents/scripts/check-file-size.ps1 -WriteBaseline tightens it; it never adds a file or raises a size.
+src-tauri/src/backup.rs	491
+src-tauri/src/commands/backup.rs	481
+src-tauri/src/commands/export.rs	411
+src-tauri/src/commands/health.rs	740
+src-tauri/src/commands/hosts.rs	472
+src-tauri/src/commands/launcher.rs	694
+src-tauri/src/commands/remote.rs	408
+src-tauri/src/commands/services.rs	551
+src-tauri/src/commands/state.rs	582
+src-tauri/src/core/probes.rs	1082
+src-tauri/src/main.rs	1570
+src-tauri/src/platform/ssh.rs	772
+src-tauri/src/platform/winrm.rs	2493
+ui/app.js	450
+ui/dashboard.js	8445

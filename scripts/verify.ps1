@@ -44,6 +44,17 @@ if (Test-Path (Join-Path $PSScriptRoot '..' 'src-tauri')) {
 Push-Location $repoRoot
 
 try {
+    # ── 0. File-size guideline ───────────────────────────────────────
+    # The agent-standards engineering skill: a code file over 400 lines needs a reason on
+    # record or a split; files already over it are listed in scripts/file-size-baseline.txt
+    # and may not grow.
+    Invoke-Step "file size guideline" {
+        $global:LASTEXITCODE = 0
+        $sizeCheck = Join-Path $HOME '.agents/scripts/check-file-size.ps1'
+        if (Test-Path -LiteralPath $sizeCheck) { & pwsh -NoProfile -File $sizeCheck -Root $repoRoot }
+        else { Write-Host 'skip - file size check: ~/.agents/scripts/check-file-size.ps1 not found' }
+    }
+
     # ── 1. Format Check ──────────────────────────────────────────────
     Write-Section "1/5 — Format Check"
     Invoke-Step "cargo fmt --check (Tauri)" {
