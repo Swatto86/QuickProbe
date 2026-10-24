@@ -1,6 +1,7 @@
 {
   "name": "quickprobe",
   "version": "1.0.0",
+  "license": "MIT",
   "description": "Windows and Linux server monitoring and management tool",
   "scripts": {
     "tauri": "tauri",
